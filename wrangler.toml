@@ -1,0 +1,20 @@
+name = "huazong-studio-api"
+main = "src/api/index.ts"
+compatibility_date = "2026-03-22"
+
+[vars]
+ENVIRONMENT = "production"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "huazong-studio"
+database_id = "" # Fill after creating D1 database
+
+[[r2_buckets]]
+binding = "ASSETS"
+bucket_name = "huazong-assets"
+
+[durable_objects]
+bindings = [
+  { name = "COLLAB", class_name = "CollabDurableObject" }
+]
