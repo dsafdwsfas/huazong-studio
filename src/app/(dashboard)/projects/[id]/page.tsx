@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { SHOT_STATUS, type ShotStatus } from "@/lib/constants";
+import { StyleGuideCard } from "@/components/StyleGuideCard";
 
 interface Shot {
   id: string;
@@ -53,6 +54,16 @@ export default function ProjectDetailPage() {
   const [parsing, setParsing] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [hoveredShot, setHoveredShot] = useState<string | null>(null);
+  const [styleGuide, setStyleGuide] = useState<any>(null);
+
+  const loadStyleGuide = useCallback(async () => {
+    try {
+      const data = await apiFetch<{ styleGuide: any }>(`/api/projects/${id}/style`);
+      setStyleGuide(data.styleGuide);
+    } catch {
+      // ignore - style guide is optional
+    }
+  }, [id]);
 
   const loadData = useCallback(async () => {
     try {
@@ -73,7 +84,8 @@ export default function ProjectDetailPage() {
 
   useEffect(() => {
     loadData();
-  }, [loadData]);
+    loadStyleGuide();
+  }, [loadData, loadStyleGuide]);
 
   async function handleParseScript(e: React.FormEvent) {
     e.preventDefault();
@@ -195,8 +207,17 @@ export default function ProjectDetailPage() {
         </div>
       </div>
 
+      {/* Style Guide */}
+      <div className="px-6 pt-4">
+        <StyleGuideCard
+          projectId={id}
+          styleGuide={styleGuide}
+          onUpdate={loadStyleGuide}
+        />
+      </div>
+
       {/* Shot Grid (Waterfall) */}
-      <div className="flex-1 overflow-auto p-6">
+      <div className="flex-1 overflow-auto px-6 pb-6">
         {filteredShots.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-[var(--muted-foreground)]">
             <FileText className="h-12 w-12 mb-3 opacity-30" />

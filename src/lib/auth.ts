@@ -14,7 +14,7 @@ export interface JWTPayload {
 }
 
 export async function createToken(payload: JWTPayload): Promise<string> {
-  return new SignJWT(payload as Record<string, unknown>)
+  return new SignJWT(payload as unknown as Record<string, unknown>)
     .setProtectedHeader({ alg: "HS256" })
     .setIssuer(JWT_ISSUER)
     .setIssuedAt()

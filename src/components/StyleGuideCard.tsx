@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Palette, Upload, Edit3, Save, X, Sparkles, Plus } from "lucide-react";
+import { Palette, Upload, Edit3, Save, X, Sparkles, Plus, Bookmark, Check } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 
 interface StyleKeywords {
@@ -33,9 +33,22 @@ const DIMENSION_LABELS: Record<string, { label: string; color: string }> = {
   reference: { label: "参考", color: "bg-sky-100 text-sky-700" },
 };
 
+interface TemplateItem {
+  id: string;
+  name: string;
+  keywordsJson: string;
+  description: string;
+}
+
 export function StyleGuideCard({ projectId, styleGuide, onUpdate }: Props) {
   const [uploading, setUploading] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
+  const [templates, setTemplates] = useState<TemplateItem[]>([]);
+  const [loadingTemplates, setLoadingTemplates] = useState(false);
+  const [applying, setApplying] = useState(false);
   const [manualInput, setManualInput] = useState("");
   const [manualKeywords, setManualKeywords] = useState<string[]>(
     styleGuide?.manualKeywords || []
@@ -80,6 +93,69 @@ export function StyleGuideCard({ projectId, styleGuide, onUpdate }: Props) {
     }
   }
 
+  async function openTemplatePicker() {
+    setShowTemplatePicker(true);
+    setLoadingTemplates(true);
+    try {
+      const data = await apiFetch<{ templates: TemplateItem[] }>("/api/style-templates");
+      setTemplates(data.templates);
+    } catch {
+      setTemplates([]);
+    } finally {
+      setLoadingTemplates(false);
+    }
+  }
+
+  async function applyTemplate(template: TemplateItem) {
+    setApplying(true);
+    try {
+      const keywords = JSON.parse(template.keywordsJson || "{}");
+      await apiFetch(`/api/projects/${projectId}/style`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          keywords,
+          manualKeywords,
+          appliedTemplate: template.name,
+          appliedAt: new Date().toISOString(),
+        }),
+      });
+      setShowTemplatePicker(false);
+      onUpdate();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "应用模板失败");
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  async function handleSaveAsTemplate() {
+    if (!styleGuide?.keywords) return;
+    setSaving(true);
+    try {
+      const name = prompt("模板名称：");
+      if (!name) {
+        setSaving(false);
+        return;
+      }
+      await apiFetch("/api/style-templates", {
+        method: "POST",
+        body: JSON.stringify({
+          name,
+          description: styleGuide.keywords.summary || "",
+          tags: [],
+          keywords: styleGuide.keywords,
+          projectId,
+        }),
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "保存模板失败");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   function addManualKeyword() {
     if (!manualInput.trim()) return;
     setManualKeywords([...manualKeywords, manualInput.trim()]);
@@ -100,6 +176,13 @@ export function StyleGuideCard({ projectId, styleGuide, onUpdate }: Props) {
           <h3 className="font-semibold text-sm">风格指南</h3>
         </div>
         <div className="flex gap-1.5">
+          <button
+            onClick={openTemplatePicker}
+            className="flex items-center gap-1 px-2.5 py-1 text-xs rounded-md bg-[var(--secondary)] hover:bg-[var(--accent)]"
+          >
+            <Sparkles className="h-3 w-3" />
+            应用模板
+          </button>
           <label className="flex items-center gap-1 px-2.5 py-1 text-xs rounded-md bg-[var(--secondary)] hover:bg-[var(--accent)] cursor-pointer transition-colors">
             <Upload className="h-3 w-3" />
             {uploading ? "提取中..." : "上传参考图"}
@@ -112,6 +195,16 @@ export function StyleGuideCard({ projectId, styleGuide, onUpdate }: Props) {
               disabled={uploading}
             />
           </label>
+          {hasStyle && (
+            <button
+              onClick={handleSaveAsTemplate}
+              disabled={saving || saved}
+              className="flex items-center gap-1 px-2.5 py-1 text-xs rounded-md bg-[var(--secondary)] hover:bg-[var(--accent)] disabled:opacity-50"
+            >
+              {saved ? <Check className="h-3 w-3 text-green-500" /> : <Bookmark className="h-3 w-3" />}
+              {saved ? "已保存" : saving ? "保存中..." : "存为模板"}
+            </button>
+          )}
           <button
             onClick={() => setEditing(!editing)}
             className="flex items-center gap-1 px-2.5 py-1 text-xs rounded-md bg-[var(--secondary)] hover:bg-[var(--accent)]"
@@ -213,6 +306,63 @@ export function StyleGuideCard({ projectId, styleGuide, onUpdate }: Props) {
               <Save className="h-3 w-3" />
               保存
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Template Picker Modal */}
+      {showTemplatePicker && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-[var(--card)] rounded-xl border border-[var(--border)] p-6 w-full max-w-md shadow-xl max-h-[70vh] flex flex-col">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">选择风格模板</h2>
+              <button
+                onClick={() => setShowTemplatePicker(false)}
+                className="p-1 rounded hover:bg-[var(--accent)]"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto space-y-2">
+              {loadingTemplates ? (
+                <div className="flex justify-center py-8">
+                  <span className="animate-spin h-5 w-5 border-2 border-[var(--primary)] border-t-transparent rounded-full" />
+                </div>
+              ) : templates.length === 0 ? (
+                <p className="text-sm text-[var(--muted-foreground)] text-center py-8">
+                  还没有风格模板，先在项目中提取风格后保存为模板
+                </p>
+              ) : (
+                templates.map((t) => {
+                  const kw = JSON.parse(t.keywordsJson || "{}");
+                  const preview = Object.values(kw).flat().slice(0, 6) as string[];
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => applyTemplate(t)}
+                      disabled={applying}
+                      className="w-full text-left p-3 rounded-lg border border-[var(--border)] hover:border-[var(--primary)] hover:bg-[var(--accent)] transition-all disabled:opacity-50"
+                    >
+                      <p className="font-medium text-sm">{t.name}</p>
+                      {t.description && (
+                        <p className="text-xs text-[var(--muted-foreground)] mt-0.5 line-clamp-1">
+                          {t.description}
+                        </p>
+                      )}
+                      {preview.length > 0 && (
+                        <div className="flex gap-1 flex-wrap mt-1.5">
+                          {preview.map((w, i) => (
+                            <span key={i} className="text-xs px-1.5 py-0.5 rounded bg-[var(--secondary)]">
+                              {w}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </button>
+                  );
+                })
+              )}
+            </div>
           </div>
         </div>
       )}
