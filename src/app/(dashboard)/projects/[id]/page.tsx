@@ -15,6 +15,9 @@ import {
   User,
   KanbanSquare,
   Coins,
+  LayoutDashboard,
+  CheckSquare,
+  SplitSquareHorizontal,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { SHOT_STATUS, type ShotStatus } from "@/lib/constants";
@@ -22,8 +25,11 @@ import { StyleGuideCard } from "@/components/StyleGuideCard";
 import { ArchivePanel } from "@/components/ArchivePanel";
 import { TaskBoard } from "@/components/TaskBoard";
 import { CreditLedger } from "@/components/CreditLedger";
+import { ProjectDashboard } from "@/components/ProjectDashboard";
+import { ReviewChecklist } from "@/components/ReviewChecklist";
+import { VersionCompare } from "@/components/VersionCompare";
 
-type TabKey = "shots" | "archives" | "tasks" | "credits";
+type TabKey = "dashboard" | "shots" | "archives" | "tasks" | "credits";
 
 interface Shot {
   id: string;
@@ -64,7 +70,10 @@ export default function ProjectDetailPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [hoveredShot, setHoveredShot] = useState<string | null>(null);
   const [styleGuide, setStyleGuide] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<TabKey>("shots");
+  const [activeTab, setActiveTab] = useState<TabKey>("dashboard");
+  const [selectedShots, setSelectedShots] = useState<Set<string>>(new Set());
+  const [showReview, setShowReview] = useState(false);
+  const [compareShot, setCompareShot] = useState<{ id: string; number: number } | null>(null);
 
   const loadStyleGuide = useCallback(async () => {
     try {
@@ -132,6 +141,45 @@ export default function ProjectDetailPage() {
     }
   }
 
+  function toggleSelect(shotId: string) {
+    setSelectedShots((prev) => {
+      const next = new Set(prev);
+      if (next.has(shotId)) next.delete(shotId);
+      else next.add(shotId);
+      return next;
+    });
+  }
+
+  function selectAll() {
+    if (selectedShots.size === filteredShots.length) {
+      setSelectedShots(new Set());
+    } else {
+      setSelectedShots(new Set(filteredShots.map((s) => s.id)));
+    }
+  }
+
+  async function batchUpdateStatus(newStatus: string) {
+    try {
+      await Promise.all(
+        Array.from(selectedShots).map((shotId) =>
+          apiFetch(`/api/shots/${shotId}/status`, {
+            method: "PATCH",
+            body: JSON.stringify({ status: newStatus }),
+          })
+        )
+      );
+      setSelectedShots(new Set());
+      loadData();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "批量操作失败");
+    }
+  }
+
+  function handleReviewComplete(passed: boolean) {
+    setShowReview(false);
+    batchUpdateStatus(passed ? "approved" : "needs_revision");
+  }
+
   const filteredShots =
     statusFilter === "all"
       ? shots
@@ -161,6 +209,7 @@ export default function ProjectDetailPage() {
         {/* Tab Navigation */}
         <div className="flex gap-1 mt-3">
           {([
+            { key: "dashboard", label: "概览", icon: LayoutDashboard },
             { key: "shots", label: "分镜板", icon: Clapperboard },
             { key: "archives", label: "档案管理", icon: User },
             { key: "tasks", label: "任务看板", icon: KanbanSquare },
@@ -183,19 +232,21 @@ export default function ProjectDetailPage() {
       </div>
 
       {/* Tab Content */}
+      {activeTab === "dashboard" && (
+        <div className="flex-1 overflow-auto p-6">
+          <StyleGuideCard
+            projectId={id}
+            styleGuide={styleGuide}
+            onUpdate={loadStyleGuide}
+          />
+          <ProjectDashboard projectId={id} />
+        </div>
+      )}
+
       {activeTab === "shots" && (
         <>
-          {/* Style Guide */}
-          <div className="px-6 pt-4">
-            <StyleGuideCard
-              projectId={id}
-              styleGuide={styleGuide}
-              onUpdate={loadStyleGuide}
-            />
-          </div>
-
           {/* Shot toolbar */}
-          <div className="px-6 pt-3 flex items-center justify-between">
+          <div className="px-6 pt-4 flex items-center justify-between">
             <div className="flex gap-2">
               <button
                 onClick={() => setShowScript(true)}
@@ -211,6 +262,29 @@ export default function ProjectDetailPage() {
                 <Plus className="h-3.5 w-3.5" />
                 添加镜头
               </button>
+              <button
+                onClick={selectAll}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-[var(--border)] rounded-lg hover:bg-[var(--accent)]"
+              >
+                <CheckSquare className="h-3.5 w-3.5" />
+                {selectedShots.size === filteredShots.length && filteredShots.length > 0 ? "取消全选" : "全选"}
+              </button>
+              {selectedShots.size > 0 && (
+                <>
+                  <button
+                    onClick={() => setShowReview(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg bg-green-500 text-white hover:bg-green-600"
+                  >
+                    批量审查 ({selectedShots.size})
+                  </button>
+                  <button
+                    onClick={() => batchUpdateStatus("needs_revision")}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border border-red-200 text-red-600 hover:bg-red-50"
+                  >
+                    批量打回
+                  </button>
+                </>
+              )}
             </div>
             <div className="flex gap-1 text-xs">
               <FilterBtn label="全部" value="all" current={statusFilter} onClick={setStatusFilter} count={shots.length} />
@@ -239,8 +313,11 @@ export default function ProjectDetailPage() {
                 key={shot.id}
                 shot={shot}
                 isHovered={hoveredShot === shot.id}
+                isSelected={selectedShots.has(shot.id)}
                 onMouseEnter={() => setHoveredShot(shot.id)}
                 onMouseLeave={() => setHoveredShot(null)}
+                onSelect={() => toggleSelect(shot.id)}
+                onCompare={() => setCompareShot({ id: shot.id, number: shot.shotNumber })}
               />
             ))}
           </div>
@@ -268,6 +345,23 @@ export default function ProjectDetailPage() {
         <div className="flex-1 overflow-auto p-6">
           <CreditLedger projectId={id} />
         </div>
+      )}
+
+      {/* Review Checklist */}
+      {showReview && (
+        <ReviewChecklist
+          onComplete={handleReviewComplete}
+          onClose={() => setShowReview(false)}
+        />
+      )}
+
+      {/* Version Compare */}
+      {compareShot && (
+        <VersionCompare
+          shotId={compareShot.id}
+          shotNumber={compareShot.number}
+          onClose={() => setCompareShot(null)}
+        />
       )}
 
       {/* Script Import Dialog */}
@@ -321,13 +415,19 @@ export default function ProjectDetailPage() {
 function ShotCard({
   shot,
   isHovered,
+  isSelected,
   onMouseEnter,
   onMouseLeave,
+  onSelect,
+  onCompare,
 }: {
   shot: Shot;
   isHovered: boolean;
+  isSelected: boolean;
   onMouseEnter: () => void;
   onMouseLeave: () => void;
+  onSelect: () => void;
+  onCompare: () => void;
 }) {
   const statusDef = SHOT_STATUS[shot.status];
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -345,7 +445,9 @@ function ShotCard({
 
   return (
     <div
-      className="group bg-[var(--card)] border border-[var(--border)] rounded-lg overflow-hidden hover:border-[var(--primary)] hover:shadow-lg transition-all cursor-pointer relative"
+      className={`group bg-[var(--card)] border rounded-lg overflow-hidden hover:border-[var(--primary)] hover:shadow-lg transition-all cursor-pointer relative ${
+        isSelected ? "border-[var(--primary)] ring-2 ring-[var(--primary)]/30" : "border-[var(--border)]"
+      }`}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     >
@@ -377,10 +479,33 @@ function ShotCard({
           </div>
         )}
 
+        {/* Select checkbox */}
+        <button
+          onClick={(e) => { e.stopPropagation(); onSelect(); }}
+          className={`absolute top-1.5 left-1.5 z-10 w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
+            isSelected
+              ? "bg-[var(--primary)] border-[var(--primary)] text-white"
+              : "bg-black/40 border-white/60 opacity-0 group-hover:opacity-100"
+          }`}
+        >
+          {isSelected && <span className="text-xs">✓</span>}
+        </button>
+
         {/* Shot number badge */}
-        <div className="absolute top-1.5 left-1.5 bg-black/60 text-white text-xs px-1.5 py-0.5 rounded font-mono">
+        <div className="absolute top-1.5 left-8 bg-black/60 text-white text-xs px-1.5 py-0.5 rounded font-mono">
           #{shot.shotNumber}
         </div>
+
+        {/* Compare button */}
+        {shot.assetCount > 1 && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onCompare(); }}
+            className="absolute bottom-1.5 left-1.5 p-1 rounded bg-black/40 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-black/60"
+            title="版本对比"
+          >
+            <SplitSquareHorizontal className="h-3 w-3" />
+          </button>
+        )}
 
         {/* Asset type indicator */}
         {shot.latestAsset && (

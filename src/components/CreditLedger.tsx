@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Plus, Coins, TrendingUp } from "lucide-react";
+import { Plus, Coins, TrendingUp, BarChart3 } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { CREDIT_PLATFORMS } from "@/lib/constants";
+import { CreditChart } from "./CreditChart";
 
 interface CreditLog {
   id: string;
@@ -35,6 +36,7 @@ export function CreditLedger({ projectId }: Props) {
   const [formNote, setFormNote] = useState("");
   const [creating, setCreating] = useState(false);
   const [filterPlatform, setFilterPlatform] = useState<string | null>(null);
+  const [showChart, setShowChart] = useState(false);
 
   const loadLogs = useCallback(async () => {
     try {
@@ -123,6 +125,22 @@ export function CreditLedger({ projectId }: Props) {
                 <p className="text-lg font-bold mt-0.5">{amount.toLocaleString()}</p>
               </div>
             ))}
+        </div>
+      )}
+
+      {/* Chart toggle + visualization */}
+      {summary && summary.totalAmount > 0 && (
+        <div className="mb-4">
+          <button
+            onClick={() => setShowChart(!showChart)}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg bg-[var(--secondary)] hover:bg-[var(--accent)] mb-3"
+          >
+            <BarChart3 className="h-3 w-3" />
+            {showChart ? "隐藏图表" : "显示图表"}
+          </button>
+          {showChart && (
+            <CreditChart byPlatform={summary.byPlatform} byUser={summary.byUser} />
+          )}
         </div>
       )}
 
