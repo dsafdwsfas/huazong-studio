@@ -52,6 +52,39 @@ export async function GET(request: NextRequest) {
   }
 }
 
+/** Update project (status change, archive/unarchive) */
+export async function PATCH(request: NextRequest) {
+  try {
+    const authHeader = request.headers.get("authorization");
+    const token = authHeader?.replace("Bearer ", "");
+    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
+
+    const payload = await verifyToken(token);
+    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+
+    if (payload.role !== "admin" && payload.role !== "director") {
+      return NextResponse.json({ error: "没有权限" }, { status: 403 });
+    }
+
+    const { projectId, status, name, description } = await request.json();
+    if (!projectId) return NextResponse.json({ error: "缺少项目ID" }, { status: 400 });
+
+    const db = getDb();
+    const project = db.projects.find((p) => p.id === projectId);
+    if (!project) return NextResponse.json({ error: "项目不存在" }, { status: 404 });
+
+    if (status) project.status = status;
+    if (name) project.name = name;
+    if (description !== undefined) project.description = description;
+    project.updatedAt = new Date().toISOString();
+
+    return NextResponse.json({ project });
+  } catch (error) {
+    console.error("Update project error:", error);
+    return NextResponse.json({ error: "更新项目失败" }, { status: 500 });
+  }
+}
+
 /** Create project */
 export async function POST(request: NextRequest) {
   try {

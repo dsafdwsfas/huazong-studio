@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, FolderOpen, Search } from "lucide-react";
+import { Plus, FolderOpen, Search, Archive, ArchiveRestore } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { PROJECT_STATUS, type ProjectStatus } from "@/lib/constants";
 
@@ -153,6 +153,18 @@ export default function ProjectsPage() {
               key={project.id}
               project={project}
               onClick={() => router.push(`/projects/${project.id}`)}
+              onArchiveToggle={async () => {
+                const newStatus = project.status === "archived" ? "active" : "archived";
+                try {
+                  await apiFetch("/api/projects", {
+                    method: "PATCH",
+                    body: JSON.stringify({ projectId: project.id, status: newStatus }),
+                  });
+                  loadProjects();
+                } catch (err) {
+                  alert(err instanceof Error ? err.message : "操作失败");
+                }
+              }}
             />
           ))}
         </div>
@@ -213,17 +225,30 @@ export default function ProjectsPage() {
 function ProjectCard({
   project,
   onClick,
+  onArchiveToggle,
 }: {
   project: Project;
   onClick: () => void;
+  onArchiveToggle: () => void;
 }) {
   const statusDef = PROJECT_STATUS[project.status];
+  const isArchived = project.status === "archived";
 
   return (
-    <button
-      onClick={onClick}
-      className="text-left bg-[var(--card)] border border-[var(--border)] rounded-xl p-4 hover:border-[var(--primary)] hover:shadow-md transition-all group"
-    >
+    <div className="relative text-left bg-[var(--card)] border border-[var(--border)] rounded-xl p-4 hover:border-[var(--primary)] hover:shadow-md transition-all group">
+      {/* Archive button */}
+      <button
+        onClick={(e) => { e.stopPropagation(); onArchiveToggle(); }}
+        className="absolute top-3 right-3 z-10 p-1.5 rounded-md bg-[var(--secondary)] opacity-0 group-hover:opacity-100 transition-opacity hover:bg-[var(--accent)]"
+        title={isArchived ? "取消归档" : "归档项目"}
+      >
+        {isArchived ? (
+          <ArchiveRestore className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />
+        ) : (
+          <Archive className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />
+        )}
+      </button>
+      <button onClick={onClick} className="w-full text-left">
       {/* Cover */}
       <div className="aspect-video bg-[var(--secondary)] rounded-lg mb-3 flex items-center justify-center overflow-hidden">
         {project.coverUrl ? (
@@ -274,6 +299,7 @@ function ProjectCard({
           更新于 {new Date(project.updatedAt).toLocaleDateString("zh-CN")}
         </p>
       </div>
-    </button>
+      </button>
+    </div>
   );
 }

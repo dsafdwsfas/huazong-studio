@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Sparkles, BookText, Palette } from "lucide-react";
+import { Sparkles, BookText, Palette, Database } from "lucide-react";
 
 const ASSET_SECTIONS = [
   {
@@ -19,6 +19,14 @@ const ASSET_SECTIONS = [
     icon: BookText,
     color: "text-sky-500",
     bgColor: "bg-sky-50",
+  },
+  {
+    title: "全局档案库",
+    description: "跨项目搜索和复用角色、道具、场景档案",
+    href: "/assets/archives",
+    icon: Database,
+    color: "text-emerald-500",
+    bgColor: "bg-emerald-50",
   },
 ];
 

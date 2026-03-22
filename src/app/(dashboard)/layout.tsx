@@ -12,6 +12,7 @@ import {
   Palette,
   BookText,
   ChevronDown,
+  Database,
 } from "lucide-react";
 
 export default function DashboardLayout({
@@ -79,6 +80,9 @@ export default function DashboardLayout({
                 </SubNavItem>
                 <SubNavItem href="/assets/prompts" icon={<BookText className="h-3.5 w-3.5" />} active={pathname === "/assets/prompts"}>
                   提示词库
+                </SubNavItem>
+                <SubNavItem href="/assets/archives" icon={<Database className="h-3.5 w-3.5" />} active={pathname === "/assets/archives"}>
+                  全局档案
                 </SubNavItem>
               </div>
             )}

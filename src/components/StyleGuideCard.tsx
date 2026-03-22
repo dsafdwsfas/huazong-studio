@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Palette, Upload, Edit3, Save, X, Sparkles, Plus, Bookmark, Check } from "lucide-react";
+import { Palette, Upload, Edit3, Save, X, Sparkles, Plus, Bookmark, Check, Wand2, Copy } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 
 interface StyleKeywords {
@@ -46,6 +46,10 @@ export function StyleGuideCard({ projectId, styleGuide, onUpdate }: Props) {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
+  const [showMigrate, setShowMigrate] = useState(false);
+  const [migrateInput, setMigrateInput] = useState("");
+  const [migrating, setMigrating] = useState(false);
+  const [migrateResult, setMigrateResult] = useState<{ zh_prompt: string; en_prompt: string; style_notes: string } | null>(null);
   const [templates, setTemplates] = useState<TemplateItem[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [applying, setApplying] = useState(false);
@@ -90,6 +94,26 @@ export function StyleGuideCard({ projectId, styleGuide, onUpdate }: Props) {
       onUpdate();
     } catch (err) {
       alert(err instanceof Error ? err.message : "保存失败");
+    }
+  }
+
+  async function handleMigrate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!migrateInput.trim()) return;
+    setMigrating(true);
+    try {
+      const data = await apiFetch<{ migration: any }>(
+        `/api/projects/${projectId}/style-migrate`,
+        {
+          method: "POST",
+          body: JSON.stringify({ contentDescription: migrateInput }),
+        }
+      );
+      setMigrateResult(data.migration);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "风格迁移失败");
+    } finally {
+      setMigrating(false);
     }
   }
 
@@ -196,14 +220,23 @@ export function StyleGuideCard({ projectId, styleGuide, onUpdate }: Props) {
             />
           </label>
           {hasStyle && (
-            <button
-              onClick={handleSaveAsTemplate}
-              disabled={saving || saved}
-              className="flex items-center gap-1 px-2.5 py-1 text-xs rounded-md bg-[var(--secondary)] hover:bg-[var(--accent)] disabled:opacity-50"
-            >
-              {saved ? <Check className="h-3 w-3 text-green-500" /> : <Bookmark className="h-3 w-3" />}
-              {saved ? "已保存" : saving ? "保存中..." : "存为模板"}
-            </button>
+            <>
+              <button
+                onClick={() => setShowMigrate(true)}
+                className="flex items-center gap-1 px-2.5 py-1 text-xs rounded-md bg-[var(--secondary)] hover:bg-[var(--accent)]"
+              >
+                <Wand2 className="h-3 w-3" />
+                风格迁移
+              </button>
+              <button
+                onClick={handleSaveAsTemplate}
+                disabled={saving || saved}
+                className="flex items-center gap-1 px-2.5 py-1 text-xs rounded-md bg-[var(--secondary)] hover:bg-[var(--accent)] disabled:opacity-50"
+              >
+                {saved ? <Check className="h-3 w-3 text-green-500" /> : <Bookmark className="h-3 w-3" />}
+                {saved ? "已保存" : saving ? "保存中..." : "存为模板"}
+              </button>
+            </>
           )}
           <button
             onClick={() => setEditing(!editing)}
@@ -306,6 +339,83 @@ export function StyleGuideCard({ projectId, styleGuide, onUpdate }: Props) {
               <Save className="h-3 w-3" />
               保存
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Style Migration Modal */}
+      {showMigrate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-[var(--card)] rounded-xl border border-[var(--border)] p-6 w-full max-w-lg shadow-xl max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <Wand2 className="h-4 w-4 text-[var(--primary)]" />
+                风格迁移
+              </h2>
+              <button
+                onClick={() => { setShowMigrate(false); setMigrateResult(null); }}
+                className="p-1 rounded hover:bg-[var(--accent)]"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="text-xs text-[var(--muted-foreground)] mb-3">
+              输入新的内容描述，AI 会将当前项目风格融合到新内容中，生成提示词。
+            </p>
+            <form onSubmit={handleMigrate} className="mb-4">
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={migrateInput}
+                  onChange={(e) => setMigrateInput(e.target.value)}
+                  placeholder="如：古代宫殿场景、宇宙飞船内部、雨中城市街道..."
+                  className="flex-1 px-3 py-2 border border-[var(--border)] rounded-lg bg-[var(--background)] text-sm focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
+                  autoFocus
+                />
+                <button
+                  type="submit"
+                  disabled={migrating || !migrateInput.trim()}
+                  className="px-4 py-2 text-sm font-medium rounded-lg bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90 disabled:opacity-50 shrink-0"
+                >
+                  {migrating ? "生成中..." : "生成"}
+                </button>
+              </div>
+            </form>
+            {migrateResult && (
+              <div className="flex-1 overflow-auto space-y-3">
+                <div className="text-xs text-[var(--muted-foreground)] italic">
+                  {migrateResult.style_notes}
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-medium">中文提示词</span>
+                    <button
+                      onClick={() => navigator.clipboard.writeText(migrateResult.zh_prompt)}
+                      className="p-1 rounded hover:bg-[var(--accent)]"
+                    >
+                      <Copy className="h-3 w-3 text-[var(--muted-foreground)]" />
+                    </button>
+                  </div>
+                  <p className="text-sm bg-[var(--secondary)] rounded-lg p-3 leading-relaxed">
+                    {migrateResult.zh_prompt}
+                  </p>
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-medium">English Prompt</span>
+                    <button
+                      onClick={() => navigator.clipboard.writeText(migrateResult.en_prompt)}
+                      className="p-1 rounded hover:bg-[var(--accent)]"
+                    >
+                      <Copy className="h-3 w-3 text-[var(--muted-foreground)]" />
+                    </button>
+                  </div>
+                  <p className="text-sm bg-[var(--secondary)] rounded-lg p-3 leading-relaxed font-mono">
+                    {migrateResult.en_prompt}
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
