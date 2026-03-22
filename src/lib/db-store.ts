@@ -90,6 +90,87 @@ interface AnnotationReply {
   createdAt: string;
 }
 
+interface Character {
+  id: string;
+  projectId: string | null;
+  name: string;
+  description: string | null;
+  isGlobal: boolean;
+  createdAt: string;
+}
+
+interface CharacterRef {
+  id: string;
+  characterId: string;
+  refImageUrl: string;
+  refType: "front" | "side" | "full" | "closeup";
+  createdAt: string;
+}
+
+interface Prop {
+  id: string;
+  projectId: string | null;
+  name: string;
+  description: string | null;
+  isGlobal: boolean;
+  createdAt: string;
+}
+
+interface PropRef {
+  id: string;
+  propId: string;
+  refImageUrl: string;
+  createdAt: string;
+}
+
+interface Scene {
+  id: string;
+  projectId: string | null;
+  name: string;
+  description: string | null;
+  timeOfDay: string | null;
+  isGlobal: boolean;
+  createdAt: string;
+}
+
+interface SceneRef {
+  id: string;
+  sceneId: string;
+  refImageUrl: string;
+  createdAt: string;
+}
+
+interface ShotRelation {
+  id: string;
+  shotId: string;
+  relationType: "character" | "prop" | "scene";
+  relationId: string;
+}
+
+interface Task {
+  id: string;
+  projectId: string;
+  shotId: string | null;
+  annotationId: string | null;
+  title: string;
+  assigneeId: string | null;
+  status: "pending" | "in_progress" | "completed";
+  priority: "low" | "medium" | "high";
+  dueDate: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface CreditLog {
+  id: string;
+  userId: string;
+  platform: string;
+  amount: number;
+  projectId: string | null;
+  note: string | null;
+  loggedAt: string;
+}
+
 interface DbStore {
   users: User[];
   inviteCodes: InviteCode[];
@@ -99,6 +180,15 @@ interface DbStore {
   assets: Asset[];
   annotations: Annotation[];
   annotationReplies: AnnotationReply[];
+  characters: Character[];
+  characterRefs: CharacterRef[];
+  props: Prop[];
+  propRefs: PropRef[];
+  scenes: Scene[];
+  sceneRefs: SceneRef[];
+  shotRelations: ShotRelation[];
+  tasks: Task[];
+  creditLogs: CreditLog[];
 }
 
 // Singleton store with seed data
@@ -139,6 +229,15 @@ export function getDb(): DbStore {
       assets: [],
       annotations: [],
       annotationReplies: [],
+      characters: [],
+      characterRefs: [],
+      props: [],
+      propRefs: [],
+      scenes: [],
+      sceneRefs: [],
+      shotRelations: [],
+      tasks: [],
+      creditLogs: [],
     };
   }
   return store;

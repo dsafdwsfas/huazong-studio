@@ -11,10 +11,19 @@ import {
   Image as ImageIcon,
   Video,
   AlertCircle,
+  Clapperboard,
+  User,
+  KanbanSquare,
+  Coins,
 } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { SHOT_STATUS, type ShotStatus } from "@/lib/constants";
 import { StyleGuideCard } from "@/components/StyleGuideCard";
+import { ArchivePanel } from "@/components/ArchivePanel";
+import { TaskBoard } from "@/components/TaskBoard";
+import { CreditLedger } from "@/components/CreditLedger";
+
+type TabKey = "shots" | "archives" | "tasks" | "credits";
 
 interface Shot {
   id: string;
@@ -55,6 +64,7 @@ export default function ProjectDetailPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [hoveredShot, setHoveredShot] = useState<string | null>(null);
   const [styleGuide, setStyleGuide] = useState<any>(null);
+  const [activeTab, setActiveTab] = useState<TabKey>("shots");
 
   const loadStyleGuide = useCallback(async () => {
     try {
@@ -148,76 +158,71 @@ export default function ProjectDetailPage() {
           </button>
           <h1 className="text-xl font-bold">{project?.name}</h1>
         </div>
-        <div className="flex items-center justify-between">
-          <div className="flex gap-2">
+        {/* Tab Navigation */}
+        <div className="flex gap-1 mt-3">
+          {([
+            { key: "shots", label: "分镜板", icon: Clapperboard },
+            { key: "archives", label: "档案管理", icon: User },
+            { key: "tasks", label: "任务看板", icon: KanbanSquare },
+            { key: "credits", label: "积分台账", icon: Coins },
+          ] as const).map((tab) => (
             <button
-              onClick={() => setShowScript(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-[var(--border)] rounded-lg hover:bg-[var(--accent)]"
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-t-lg transition-colors ${
+                activeTab === tab.key
+                  ? "bg-[var(--background)] text-[var(--foreground)] font-medium border border-[var(--border)] border-b-transparent -mb-px"
+                  : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+              }`}
             >
-              <FileText className="h-3.5 w-3.5" />
-              导入剧本
+              <tab.icon className="h-3.5 w-3.5" />
+              {tab.label}
             </button>
-            <button
-              onClick={handleAddShot}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-[var(--border)] rounded-lg hover:bg-[var(--accent)]"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              添加镜头
-            </button>
-          </div>
-
-          {/* Status filter */}
-          <div className="flex gap-1 text-xs">
-            <FilterBtn
-              label="全部"
-              value="all"
-              current={statusFilter}
-              onClick={setStatusFilter}
-              count={shots.length}
-            />
-            <FilterBtn
-              label="待上传"
-              value="pending_upload"
-              current={statusFilter}
-              onClick={setStatusFilter}
-              count={shots.filter((s) => s.status === "pending_upload").length}
-            />
-            <FilterBtn
-              label="待审查"
-              value="pending_review"
-              current={statusFilter}
-              onClick={setStatusFilter}
-              count={shots.filter((s) => s.status === "pending_review").length}
-            />
-            <FilterBtn
-              label="需修改"
-              value="needs_revision"
-              current={statusFilter}
-              onClick={setStatusFilter}
-              count={shots.filter((s) => s.status === "needs_revision").length}
-            />
-            <FilterBtn
-              label="通过"
-              value="approved"
-              current={statusFilter}
-              onClick={setStatusFilter}
-              count={shots.filter((s) => s.status === "approved").length}
-            />
-          </div>
+          ))}
         </div>
       </div>
 
-      {/* Style Guide */}
-      <div className="px-6 pt-4">
-        <StyleGuideCard
-          projectId={id}
-          styleGuide={styleGuide}
-          onUpdate={loadStyleGuide}
-        />
-      </div>
+      {/* Tab Content */}
+      {activeTab === "shots" && (
+        <>
+          {/* Style Guide */}
+          <div className="px-6 pt-4">
+            <StyleGuideCard
+              projectId={id}
+              styleGuide={styleGuide}
+              onUpdate={loadStyleGuide}
+            />
+          </div>
 
-      {/* Shot Grid (Waterfall) */}
-      <div className="flex-1 overflow-auto px-6 pb-6">
+          {/* Shot toolbar */}
+          <div className="px-6 pt-3 flex items-center justify-between">
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowScript(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-[var(--border)] rounded-lg hover:bg-[var(--accent)]"
+              >
+                <FileText className="h-3.5 w-3.5" />
+                导入剧本
+              </button>
+              <button
+                onClick={handleAddShot}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-[var(--border)] rounded-lg hover:bg-[var(--accent)]"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                添加镜头
+              </button>
+            </div>
+            <div className="flex gap-1 text-xs">
+              <FilterBtn label="全部" value="all" current={statusFilter} onClick={setStatusFilter} count={shots.length} />
+              <FilterBtn label="待上传" value="pending_upload" current={statusFilter} onClick={setStatusFilter} count={shots.filter((s) => s.status === "pending_upload").length} />
+              <FilterBtn label="待审查" value="pending_review" current={statusFilter} onClick={setStatusFilter} count={shots.filter((s) => s.status === "pending_review").length} />
+              <FilterBtn label="需修改" value="needs_revision" current={statusFilter} onClick={setStatusFilter} count={shots.filter((s) => s.status === "needs_revision").length} />
+              <FilterBtn label="通过" value="approved" current={statusFilter} onClick={setStatusFilter} count={shots.filter((s) => s.status === "approved").length} />
+            </div>
+          </div>
+
+          {/* Shot Grid (Waterfall) */}
+          <div className="flex-1 overflow-auto px-6 pb-6 pt-3">
         {filteredShots.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-[var(--muted-foreground)]">
             <FileText className="h-12 w-12 mb-3 opacity-30" />
@@ -241,6 +246,29 @@ export default function ProjectDetailPage() {
           </div>
         )}
       </div>
+
+        </>
+      )}
+
+      {activeTab === "archives" && (
+        <div className="flex-1 overflow-auto p-6 space-y-6">
+          <ArchivePanel projectId={id} type="characters" />
+          <ArchivePanel projectId={id} type="props" />
+          <ArchivePanel projectId={id} type="scenes" />
+        </div>
+      )}
+
+      {activeTab === "tasks" && (
+        <div className="flex-1 overflow-auto p-6">
+          <TaskBoard projectId={id} />
+        </div>
+      )}
+
+      {activeTab === "credits" && (
+        <div className="flex-1 overflow-auto p-6">
+          <CreditLedger projectId={id} />
+        </div>
+      )}
 
       {/* Script Import Dialog */}
       {showScript && (
