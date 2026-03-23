@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyToken } from "@/lib/auth";
+import { requireAuth } from "@/lib/auth";
 import { generateId } from "@/lib/id";
 import { getDb } from "@/lib/db-store";
 
@@ -10,43 +10,57 @@ export async function GET(
 ) {
   try {
     const { id: projectId } = await params;
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
 
     const { searchParams } = new URL(request.url);
     const platform = searchParams.get("platform");
     const userId = searchParams.get("userId");
 
     const db = getDb();
-    let logs = db.creditLogs.filter((l) => l.projectId === projectId);
 
-    if (platform) logs = logs.filter((l) => l.platform === platform);
-    if (userId) logs = logs.filter((l) => l.userId === userId);
+    let sql = "SELECT * FROM credit_logs WHERE project_id = ?";
+    const params_arr: unknown[] = [projectId];
 
-    // Sort by newest first
-    logs.sort((a, b) => new Date(b.loggedAt).getTime() - new Date(a.loggedAt).getTime());
+    if (platform) {
+      sql += " AND platform = ?";
+      params_arr.push(platform);
+    }
+    if (userId) {
+      sql += " AND user_id = ?";
+      params_arr.push(userId);
+    }
+
+    sql += " ORDER BY logged_at DESC";
+
+    const logs = db.all<Record<string, unknown>>(sql, ...params_arr);
 
     // Enrich with user nickname
     const result = logs.map((l) => {
-      const user = db.users.find((u) => u.id === l.userId);
+      const user = db.get<{ nickname: string }>(
+        "SELECT nickname FROM users WHERE id = ?",
+        l.user_id
+      );
       return { ...l, userName: user?.nickname || "未知" };
     });
 
     // Summary stats
-    const totalAmount = logs.reduce((sum, l) => sum + l.amount, 0);
+    const totalAmount = logs.reduce((sum, l) => sum + (l.amount as number), 0);
     const byPlatform: Record<string, number> = {};
     const byUser: Record<string, { name: string; amount: number }> = {};
     for (const l of logs) {
-      byPlatform[l.platform] = (byPlatform[l.platform] || 0) + l.amount;
-      if (!byUser[l.userId]) {
-        const user = db.users.find((u) => u.id === l.userId);
-        byUser[l.userId] = { name: user?.nickname || "未知", amount: 0 };
+      const plat = l.platform as string;
+      const uid = l.user_id as string;
+      const amt = l.amount as number;
+      byPlatform[plat] = (byPlatform[plat] || 0) + amt;
+      if (!byUser[uid]) {
+        const user = db.get<{ nickname: string }>(
+          "SELECT nickname FROM users WHERE id = ?",
+          uid
+        );
+        byUser[uid] = { name: user?.nickname || "未知", amount: 0 };
       }
-      byUser[l.userId].amount += l.amount;
+      byUser[uid].amount += amt;
     }
 
     return NextResponse.json({
@@ -66,12 +80,9 @@ export async function POST(
 ) {
   try {
     const { id: projectId } = await params;
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
+    const { payload } = auth;
 
     const { platform, amount, note, userId } = await request.json();
     if (!platform) return NextResponse.json({ error: "请选择平台" }, { status: 400 });
@@ -87,18 +98,41 @@ export async function POST(
     }
 
     const db = getDb();
-    const log = {
-      id: generateId("crl"),
-      userId: targetUserId,
+    const now = new Date().toISOString();
+    const logId = generateId("crl");
+
+    db.run(
+      "INSERT INTO credit_logs (id, user_id, platform, amount, project_id, note, logged_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      logId,
+      targetUserId,
       platform,
       amount,
       projectId,
-      note: note || null,
-      loggedAt: new Date().toISOString(),
-    };
-    db.creditLogs.push(log);
+      note || null,
+      now
+    );
 
-    const user = db.users.find((u) => u.id === log.userId);
+    const log = db.get<Record<string, unknown>>(
+      "SELECT * FROM credit_logs WHERE id = ?",
+      logId
+    );
+
+    const user = db.get<{ nickname: string }>(
+      "SELECT nickname FROM users WHERE id = ?",
+      targetUserId
+    );
+
+    // Activity log
+    db.run(
+      "INSERT INTO activity_logs (id, user_id, project_id, action, details_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      generateId("log"),
+      payload.sub,
+      projectId,
+      "create_credit_log",
+      JSON.stringify({ logId, platform, amount, targetUserId }),
+      now
+    );
+
     return NextResponse.json(
       { log: { ...log, userName: user?.nickname || "未知" } },
       { status: 201 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyToken } from "@/lib/auth";
+import { requireAuth } from "@/lib/auth";
 import { generateId } from "@/lib/id";
 import { getDb } from "@/lib/db-store";
 
@@ -10,27 +10,39 @@ export async function GET(
 ) {
   try {
     const { id: shotId } = await params;
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
 
     const db = getDb();
-    const assets = db.assets
-      .filter((a) => a.shotId === shotId)
-      .sort((a, b) => b.versionNumber - a.versionNumber);
+    const assets = db.all<Record<string, unknown>>(
+      "SELECT * FROM assets WHERE shot_id = ? ORDER BY version_number DESC",
+      shotId
+    );
 
     // Enrich with uploader info and annotations
     const enriched = assets.map((asset) => {
-      const uploader = db.users.find((u) => u.id === asset.uploadedBy);
-      const annotations = db.annotations.filter((a) => a.assetId === asset.id);
+      const uploader = db.get<{ nickname: string }>(
+        "SELECT nickname FROM users WHERE id = ?",
+        asset.uploaded_by
+      );
+
+      const annotationCount =
+        db.get<{ cnt: number }>(
+          "SELECT COUNT(*) as cnt FROM annotations WHERE asset_id = ?",
+          asset.id
+        )?.cnt ?? 0;
+
+      const unresolvedCount =
+        db.get<{ cnt: number }>(
+          "SELECT COUNT(*) as cnt FROM annotations WHERE asset_id = ? AND status != 'resolved'",
+          asset.id
+        )?.cnt ?? 0;
+
       return {
         ...asset,
         uploaderName: uploader?.nickname || "未知",
-        annotationCount: annotations.length,
-        unresolvedCount: annotations.filter((a) => a.status !== "resolved").length,
+        annotationCount,
+        unresolvedCount,
       };
     });
 
@@ -48,15 +60,15 @@ export async function POST(
 ) {
   try {
     const { id: shotId } = await params;
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
+    const { payload } = auth;
 
     const db = getDb();
-    const shot = db.shots.find((s) => s.id === shotId);
+    const shot = db.get<{ id: string; status: string; project_id: string }>(
+      "SELECT id, status, project_id FROM shots WHERE id = ?",
+      shotId
+    );
     if (!shot) return NextResponse.json({ error: "镜头不存在" }, { status: 404 });
 
     const { fileUrl, fileType, thumbnailUrl } = await request.json();
@@ -69,28 +81,51 @@ export async function POST(
     }
 
     // Calculate version number
-    const existingAssets = db.assets.filter((a) => a.shotId === shotId);
-    const versionNumber = existingAssets.length + 1;
-    const now = new Date().toISOString();
+    const versionNumber =
+      (db.get<{ cnt: number }>(
+        "SELECT COUNT(*) as cnt FROM assets WHERE shot_id = ?",
+        shotId
+      )?.cnt ?? 0) + 1;
 
-    const asset = {
-      id: generateId("ast"),
+    const now = new Date().toISOString();
+    const assetId = generateId("ast");
+
+    db.run(
+      "INSERT INTO assets (id, shot_id, file_url, file_type, version_number, thumbnail_url, uploaded_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      assetId,
       shotId,
       fileUrl,
-      fileType: fileType as "image" | "video",
+      fileType,
       versionNumber,
-      thumbnailUrl: thumbnailUrl || null,
-      uploadedBy: payload.sub,
-      createdAt: now,
-    };
-
-    db.assets.push(asset);
+      thumbnailUrl || null,
+      payload.sub,
+      now
+    );
 
     // Update shot status if it was pending_upload
     if (shot.status === "pending_upload") {
-      shot.status = "pending_review";
-      shot.updatedAt = now;
+      db.run(
+        "UPDATE shots SET status = 'pending_review', updated_at = ? WHERE id = ?",
+        now,
+        shotId
+      );
     }
+
+    const asset = db.get<Record<string, unknown>>(
+      "SELECT * FROM assets WHERE id = ?",
+      assetId
+    );
+
+    // Activity log
+    db.run(
+      "INSERT INTO activity_logs (id, user_id, project_id, action, details_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      generateId("log"),
+      payload.sub,
+      shot.project_id,
+      "upload_asset",
+      JSON.stringify({ assetId, shotId, fileType, versionNumber }),
+      now
+    );
 
     return NextResponse.json({ asset }, { status: 201 });
   } catch (error) {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyToken } from "@/lib/auth";
+import { requireAuth } from "@/lib/auth";
 import { generateId } from "@/lib/id";
 import { getDb } from "@/lib/db-store";
 
@@ -10,36 +10,41 @@ export async function GET(
 ) {
   try {
     const { id: projectId } = await params;
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
 
     const { searchParams } = new URL(request.url);
     const status = searchParams.get("status");
     const assignee = searchParams.get("assignee");
 
     const db = getDb();
-    let taskList = db.tasks.filter((t) => t.projectId === projectId);
 
-    if (status) taskList = taskList.filter((t) => t.status === status);
-    if (assignee) taskList = taskList.filter((t) => t.assigneeId === assignee);
+    let sql = "SELECT * FROM tasks WHERE project_id = ?";
+    const params_arr: unknown[] = [projectId];
+
+    if (status) {
+      sql += " AND status = ?";
+      params_arr.push(status);
+    }
+    if (assignee) {
+      sql += " AND assignee_id = ?";
+      params_arr.push(assignee);
+    }
+
+    sql += " ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 END ASC, created_at DESC";
+
+    const taskList = db.all<Record<string, unknown>>(sql, ...params_arr);
 
     // Enrich with assignee name
     const result = taskList.map((t) => {
-      const user = db.users.find((u) => u.id === t.assigneeId);
+      const user = t.assignee_id
+        ? db.get<{ nickname: string }>(
+            "SELECT nickname FROM users WHERE id = ?",
+            t.assignee_id
+          )
+        : null;
       return { ...t, assigneeName: user?.nickname || null };
     });
-
-    // Sort by priority (high first), then by creation date
-    const priorityOrder = { high: 0, medium: 1, low: 2 };
-    result.sort(
-      (a, b) =>
-        priorityOrder[a.priority] - priorityOrder[b.priority] ||
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
 
     return NextResponse.json({ tasks: result });
   } catch (error) {
@@ -55,12 +60,9 @@ export async function POST(
 ) {
   try {
     const { id: projectId } = await params;
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
+    const { payload } = auth;
 
     const { title, assigneeId, shotId, annotationId, priority, dueDate } =
       await request.json();
@@ -73,22 +75,46 @@ export async function POST(
 
     const db = getDb();
     const now = new Date().toISOString();
-    const task = {
-      id: generateId("tsk"),
-      projectId,
-      shotId: shotId || null,
-      annotationId: annotationId || null,
-      title,
-      assigneeId: assigneeId || null,
-      status: "pending" as const,
-      priority: validPriority as "low" | "medium" | "high",
-      dueDate: dueDate || null,
-      createdAt: now,
-      updatedAt: now,
-    };
-    db.tasks.push(task);
+    const taskId = generateId("tsk");
 
-    const user = db.users.find((u) => u.id === task.assigneeId);
+    db.run(
+      `INSERT INTO tasks (id, project_id, shot_id, annotation_id, title, assignee_id, status, priority, due_date, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)`,
+      taskId,
+      projectId,
+      shotId || null,
+      annotationId || null,
+      title,
+      assigneeId || null,
+      validPriority,
+      dueDate || null,
+      now,
+      now
+    );
+
+    const task = db.get<Record<string, unknown>>(
+      "SELECT * FROM tasks WHERE id = ?",
+      taskId
+    );
+
+    const user = assigneeId
+      ? db.get<{ nickname: string }>(
+          "SELECT nickname FROM users WHERE id = ?",
+          assigneeId
+        )
+      : null;
+
+    // Activity log
+    db.run(
+      "INSERT INTO activity_logs (id, user_id, project_id, action, details_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      generateId("log"),
+      payload.sub,
+      projectId,
+      "create_task",
+      JSON.stringify({ taskId, title }),
+      now
+    );
+
     return NextResponse.json(
       { task: { ...task, assigneeName: user?.nickname || null } },
       { status: 201 }
@@ -105,20 +131,20 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await params;
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+    const { id: projectId } = await params;
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
+    const { payload } = auth;
 
     const { taskId, status, assigneeId, priority, dueDate, title } =
       await request.json();
     if (!taskId) return NextResponse.json({ error: "缺少任务ID" }, { status: 400 });
 
     const db = getDb();
-    const task = db.tasks.find((t) => t.id === taskId);
+    const task = db.get<Record<string, unknown>>(
+      "SELECT * FROM tasks WHERE id = ?",
+      taskId
+    );
     if (!task) return NextResponse.json({ error: "任务不存在" }, { status: 404 });
 
     if (status) {
@@ -126,22 +152,65 @@ export async function PATCH(
       if (!VALID_STATUSES.includes(status)) {
         return NextResponse.json({ error: "无效的任务状态" }, { status: 400 });
       }
-      task.status = status;
     }
-    if (assigneeId !== undefined) task.assigneeId = assigneeId;
     if (priority) {
       const VALID_PRIORITIES = ["low", "medium", "high"];
       if (!VALID_PRIORITIES.includes(priority)) {
         return NextResponse.json({ error: "无效的优先级" }, { status: 400 });
       }
-      task.priority = priority;
     }
-    if (dueDate !== undefined) task.dueDate = dueDate;
-    if (title) task.title = title;
-    task.updatedAt = new Date().toISOString();
 
-    const user = db.users.find((u) => u.id === task.assigneeId);
-    return NextResponse.json({ task: { ...task, assigneeName: user?.nickname || null } });
+    const now = new Date().toISOString();
+    const sets: string[] = ["updated_at = ?"];
+    const params_arr: unknown[] = [now];
+
+    if (status) {
+      sets.push("status = ?");
+      params_arr.push(status);
+    }
+    if (assigneeId !== undefined) {
+      sets.push("assignee_id = ?");
+      params_arr.push(assigneeId);
+    }
+    if (priority) {
+      sets.push("priority = ?");
+      params_arr.push(priority);
+    }
+    if (dueDate !== undefined) {
+      sets.push("due_date = ?");
+      params_arr.push(dueDate);
+    }
+    if (title) {
+      sets.push("title = ?");
+      params_arr.push(title);
+    }
+
+    params_arr.push(taskId);
+    db.run(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`, ...params_arr);
+
+    const updated = db.get<Record<string, unknown>>(
+      "SELECT * FROM tasks WHERE id = ?",
+      taskId
+    );
+    const user = updated?.assignee_id
+      ? db.get<{ nickname: string }>(
+          "SELECT nickname FROM users WHERE id = ?",
+          updated.assignee_id
+        )
+      : null;
+
+    // Activity log
+    db.run(
+      "INSERT INTO activity_logs (id, user_id, project_id, action, details_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      generateId("log"),
+      payload.sub,
+      projectId,
+      "update_task",
+      JSON.stringify({ taskId, status, assigneeId, priority }),
+      now
+    );
+
+    return NextResponse.json({ task: { ...updated, assigneeName: user?.nickname || null } });
   } catch (error) {
     console.error("Update task error:", error);
     return NextResponse.json({ error: "更新任务失败" }, { status: 500 });

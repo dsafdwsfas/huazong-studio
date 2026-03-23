@@ -1,20 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyToken } from "@/lib/auth";
+import { requireAuth } from "@/lib/auth";
 import { getDb } from "@/lib/db-store";
-
-function getActivityLogs() {
-  return getDb().activityLogs;
-}
 
 /** List activity logs (admin only) */
 export async function GET(request: NextRequest) {
   try {
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
+    const { payload } = auth;
 
     if (payload.role !== "admin") {
       return NextResponse.json({ error: "仅管理员可查看操作日志" }, { status: 403 });
@@ -26,24 +19,44 @@ export async function GET(request: NextRequest) {
     const action = searchParams.get("action");
 
     const db = getDb();
-    let logs = getActivityLogs();
 
-    if (projectId) logs = logs.filter((l) => l.projectId === projectId);
-    if (userId) logs = logs.filter((l) => l.userId === userId);
-    if (action) logs = logs.filter((l) => l.action === action);
+    let sql = "SELECT * FROM activity_logs WHERE 1=1";
+    const params: unknown[] = [];
 
-    // Sort newest first
-    logs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    if (projectId) {
+      sql += " AND project_id = ?";
+      params.push(projectId);
+    }
+    if (userId) {
+      sql += " AND user_id = ?";
+      params.push(userId);
+    }
+    if (action) {
+      sql += " AND action = ?";
+      params.push(action);
+    }
+
+    sql += " ORDER BY created_at DESC LIMIT 100";
+
+    const logs = db.all<Record<string, unknown>>(sql, ...params);
 
     // Enrich with user and project names
-    const result = logs.slice(0, 100).map((l) => {
-      const user = db.users.find((u) => u.id === l.userId);
-      const project = l.projectId ? db.projects.find((p) => p.id === l.projectId) : null;
+    const result = logs.map((l) => {
+      const user = db.get<{ nickname: string }>(
+        "SELECT nickname FROM users WHERE id = ?",
+        l.user_id
+      );
+      const project = l.project_id
+        ? db.get<{ name: string }>(
+            "SELECT name FROM projects WHERE id = ?",
+            l.project_id
+          )
+        : null;
       return {
         ...l,
         userName: user?.nickname || "未知",
         projectName: project?.name || null,
-        details: l.detailsJson ? JSON.parse(l.detailsJson) : null,
+        details: l.details_json ? JSON.parse(l.details_json as string) : null,
       };
     });
 

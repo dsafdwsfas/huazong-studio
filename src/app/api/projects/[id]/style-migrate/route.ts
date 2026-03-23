@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyToken } from "@/lib/auth";
+import { requireAuth } from "@/lib/auth";
 import { getDb } from "@/lib/db-store";
 
 const MIGRATION_PROMPT = `你是一位专业的 AI 影视提示词工程师。
@@ -29,12 +29,8 @@ export async function POST(
 ) {
   try {
     const { id: projectId } = await params;
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
 
     const { contentDescription } = await request.json();
     if (!contentDescription) {
@@ -42,11 +38,14 @@ export async function POST(
     }
 
     const db = getDb();
-    const project = db.projects.find((p) => p.id === projectId);
+    const project = db.get<{ id: string; style_guide_json: string | null }>(
+      "SELECT id, style_guide_json FROM projects WHERE id = ?",
+      projectId
+    );
     if (!project) return NextResponse.json({ error: "项目不存在" }, { status: 404 });
 
-    const styleGuide = project.styleGuideJson
-      ? JSON.parse(project.styleGuideJson)
+    const styleGuide = project.style_guide_json
+      ? JSON.parse(project.style_guide_json)
       : null;
 
     if (!styleGuide?.keywords) {
@@ -56,7 +55,6 @@ export async function POST(
     const apiKey = process.env.GEMINI_API_KEY;
 
     if (apiKey) {
-      // Real Gemini API call
       const prompt = MIGRATION_PROMPT
         .replace("{style_json}", JSON.stringify(styleGuide.keywords, null, 2))
         .replace("{content_description}", contentDescription);

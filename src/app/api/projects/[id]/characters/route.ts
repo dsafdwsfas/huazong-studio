@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyToken } from "@/lib/auth";
+import { requireAuth } from "@/lib/auth";
 import { generateId } from "@/lib/id";
 import { getDb } from "@/lib/db-store";
 
@@ -10,18 +10,21 @@ export async function GET(
 ) {
   try {
     const { id: projectId } = await params;
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
 
     const db = getDb();
-    const characters = db.characters.filter((c) => c.projectId === projectId);
+    const characters = db.all<Record<string, unknown>>(
+      "SELECT * FROM characters WHERE project_id = ?",
+      projectId
+    );
+
     const result = characters.map((c) => ({
       ...c,
-      refs: db.characterRefs.filter((r) => r.characterId === c.id),
+      refs: db.all<Record<string, unknown>>(
+        "SELECT * FROM character_refs WHERE character_id = ?",
+        c.id
+      ),
     }));
 
     return NextResponse.json({ characters: result });
@@ -38,42 +41,62 @@ export async function POST(
 ) {
   try {
     const { id: projectId } = await params;
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
+    const { payload } = auth;
 
     const { name, description, refImages } = await request.json();
     if (!name) return NextResponse.json({ error: "角色名称不能为空" }, { status: 400 });
 
     const db = getDb();
-    const character = {
-      id: generateId("chr"),
+    const now = new Date().toISOString();
+    const characterId = generateId("chr");
+
+    db.run(
+      "INSERT INTO characters (id, project_id, name, description, is_global, created_at) VALUES (?, ?, ?, ?, 0, ?)",
+      characterId,
       projectId,
       name,
-      description: description || null,
-      isGlobal: false,
-      createdAt: new Date().toISOString(),
-    };
-    db.characters.push(character);
+      description || null,
+      now
+    );
 
     // Add reference images if provided
-    const refs: any[] = [];
+    const refs: Record<string, unknown>[] = [];
     if (refImages && Array.isArray(refImages)) {
       for (const img of refImages) {
-        const ref = {
-          id: generateId("crf"),
-          characterId: character.id,
-          refImageUrl: img.url || img.base64 || "",
-          refType: img.type || "front",
-          createdAt: new Date().toISOString(),
-        };
-        db.characterRefs.push(ref);
-        refs.push(ref);
+        const refId = generateId("crf");
+        db.run(
+          "INSERT INTO character_refs (id, character_id, ref_image_url, ref_type, created_at) VALUES (?, ?, ?, ?, ?)",
+          refId,
+          characterId,
+          img.url || img.base64 || "",
+          img.type || "front",
+          now
+        );
+        const ref = db.get<Record<string, unknown>>(
+          "SELECT * FROM character_refs WHERE id = ?",
+          refId
+        );
+        if (ref) refs.push(ref);
       }
     }
+
+    const character = db.get<Record<string, unknown>>(
+      "SELECT * FROM characters WHERE id = ?",
+      characterId
+    );
+
+    // Activity log
+    db.run(
+      "INSERT INTO activity_logs (id, user_id, project_id, action, details_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      generateId("log"),
+      payload.sub,
+      projectId,
+      "create_character",
+      JSON.stringify({ characterId, name }),
+      now
+    );
 
     return NextResponse.json({ character: { ...character, refs } }, { status: 201 });
   } catch (error) {
@@ -88,28 +111,41 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await params;
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+    const { id: projectId } = await params;
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
+    const { payload } = auth;
 
     const { searchParams } = new URL(request.url);
     const characterId = searchParams.get("characterId");
     if (!characterId) return NextResponse.json({ error: "缺少角色ID" }, { status: 400 });
 
     const db = getDb();
-    const idx = db.characters.findIndex((c) => c.id === characterId);
-    if (idx === -1) return NextResponse.json({ error: "角色不存在" }, { status: 404 });
+    const character = db.get<{ id: string; name: string }>(
+      "SELECT id, name FROM characters WHERE id = ?",
+      characterId
+    );
+    if (!character) return NextResponse.json({ error: "角色不存在" }, { status: 404 });
 
-    db.characters.splice(idx, 1);
-    // Clean up refs and relations
-    db.characterRefs = db.characterRefs.filter((r) => r.characterId !== characterId) as any;
-    db.shotRelations = db.shotRelations.filter(
-      (r) => !(r.relationType === "character" && r.relationId === characterId)
-    ) as any;
+    // Delete character (cascade deletes refs)
+    db.run("DELETE FROM character_refs WHERE character_id = ?", characterId);
+    db.run(
+      "DELETE FROM shot_relations WHERE relation_type = 'character' AND relation_id = ?",
+      characterId
+    );
+    db.run("DELETE FROM characters WHERE id = ?", characterId);
+
+    // Activity log
+    const now = new Date().toISOString();
+    db.run(
+      "INSERT INTO activity_logs (id, user_id, project_id, action, details_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      generateId("log"),
+      payload.sub,
+      projectId,
+      "delete_character",
+      JSON.stringify({ characterId, name: character.name }),
+      now
+    );
 
     return NextResponse.json({ success: true });
   } catch (error) {

@@ -1,33 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyToken } from "@/lib/auth";
+import { requireAuth } from "@/lib/auth";
 import { generateId } from "@/lib/id";
 import { getDb } from "@/lib/db-store";
-
-function getPrompts() {
-  return getDb().prompts;
-}
 
 /** List prompts */
 export async function GET(request: NextRequest) {
   try {
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
 
     const { searchParams } = new URL(request.url);
     const tag = searchParams.get("tag");
     const search = searchParams.get("q");
     const sort = searchParams.get("sort") || "newest";
 
-    let prompts = getPrompts();
+    const db = getDb();
+
+    let prompts = db.all<Record<string, unknown>>("SELECT * FROM prompts");
 
     // Filter by tag
     if (tag) {
       prompts = prompts.filter((p) => {
-        const tags = JSON.parse(p.tagsJson || "[]");
+        const tags = JSON.parse((p.tags_json as string) || "[]");
         return tags.includes(tag);
       });
     }
@@ -37,28 +31,32 @@ export async function GET(request: NextRequest) {
       const q = search.toLowerCase();
       prompts = prompts.filter(
         (p) =>
-          p.title.toLowerCase().includes(q) ||
-          p.content.toLowerCase().includes(q) ||
-          p.tagsJson.toLowerCase().includes(q)
+          (p.title as string).toLowerCase().includes(q) ||
+          (p.content as string).toLowerCase().includes(q) ||
+          ((p.tags_json as string) || "").toLowerCase().includes(q)
       );
     }
 
     // Sort
     if (sort === "popular") {
-      prompts.sort((a, b) => b.usageCount - a.usageCount);
+      prompts.sort((a, b) => (b.usage_count as number) - (a.usage_count as number));
     } else {
       prompts.sort(
-        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        (a, b) =>
+          new Date(b.created_at as string).getTime() -
+          new Date(a.created_at as string).getTime()
       );
     }
 
     // Enrich with creator name
-    const db = getDb();
     const enriched = prompts.map((p) => {
-      const creator = db.users.find((u) => u.id === p.createdBy);
+      const creator = db.get<{ nickname: string }>(
+        "SELECT nickname FROM users WHERE id = ?",
+        p.created_by
+      );
       return {
         ...p,
-        tags: JSON.parse(p.tagsJson || "[]"),
+        tags: JSON.parse((p.tags_json as string) || "[]"),
         creatorName: creator?.nickname || "未知",
       };
     });
@@ -73,12 +71,9 @@ export async function GET(request: NextRequest) {
 /** Create prompt */
 export async function POST(request: NextRequest) {
   try {
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
+    const { payload } = auth;
 
     const { title, content, format, tags, previewImageUrl } = await request.json();
 
@@ -97,21 +92,39 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const db = getDb();
     const now = new Date().toISOString();
-    const prompt = {
-      id: generateId("pmt"),
+    const promptId = generateId("pmt");
+
+    db.run(
+      `INSERT INTO prompts (id, title, content, format, tags_json, preview_image_url, usage_count, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+      promptId,
       title,
       content,
-      format: detectedFormat as "text" | "json",
-      tagsJson: JSON.stringify(tags || []),
-      previewImageUrl: previewImageUrl || null,
-      usageCount: 0,
-      createdBy: payload.sub,
-      createdAt: now,
-      updatedAt: now,
-    };
+      detectedFormat,
+      JSON.stringify(tags || []),
+      previewImageUrl || null,
+      payload.sub,
+      now,
+      now
+    );
 
-    getPrompts().push(prompt);
+    const prompt = db.get<Record<string, unknown>>(
+      "SELECT * FROM prompts WHERE id = ?",
+      promptId
+    );
+
+    // Activity log
+    db.run(
+      "INSERT INTO activity_logs (id, user_id, project_id, action, details_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      generateId("log"),
+      payload.sub,
+      null,
+      "create_prompt",
+      JSON.stringify({ promptId, title }),
+      now
+    );
 
     return NextResponse.json({ prompt }, { status: 201 });
   } catch (error) {

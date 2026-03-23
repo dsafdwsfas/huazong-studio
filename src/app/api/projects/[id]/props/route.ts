@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyToken } from "@/lib/auth";
+import { requireAuth } from "@/lib/auth";
 import { generateId } from "@/lib/id";
 import { getDb } from "@/lib/db-store";
 
@@ -10,18 +10,21 @@ export async function GET(
 ) {
   try {
     const { id: projectId } = await params;
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
 
     const db = getDb();
-    const propsList = db.props.filter((p) => p.projectId === projectId);
+    const propsList = db.all<Record<string, unknown>>(
+      "SELECT * FROM props WHERE project_id = ?",
+      projectId
+    );
+
     const result = propsList.map((p) => ({
       ...p,
-      refs: db.propRefs.filter((r) => r.propId === p.id),
+      refs: db.all<Record<string, unknown>>(
+        "SELECT * FROM prop_refs WHERE prop_id = ?",
+        p.id
+      ),
     }));
 
     return NextResponse.json({ props: result });
@@ -38,40 +41,60 @@ export async function POST(
 ) {
   try {
     const { id: projectId } = await params;
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
+    const { payload } = auth;
 
     const { name, description, refImages } = await request.json();
     if (!name) return NextResponse.json({ error: "道具名称不能为空" }, { status: 400 });
 
     const db = getDb();
-    const prop = {
-      id: generateId("prp"),
+    const now = new Date().toISOString();
+    const propId = generateId("prp");
+
+    db.run(
+      "INSERT INTO props (id, project_id, name, description, is_global, created_at) VALUES (?, ?, ?, ?, 0, ?)",
+      propId,
       projectId,
       name,
-      description: description || null,
-      isGlobal: false,
-      createdAt: new Date().toISOString(),
-    };
-    db.props.push(prop);
+      description || null,
+      now
+    );
 
-    const refs: any[] = [];
+    const refs: Record<string, unknown>[] = [];
     if (refImages && Array.isArray(refImages)) {
       for (const img of refImages) {
-        const ref = {
-          id: generateId("prf"),
-          propId: prop.id,
-          refImageUrl: img.url || img.base64 || "",
-          createdAt: new Date().toISOString(),
-        };
-        db.propRefs.push(ref);
-        refs.push(ref);
+        const refId = generateId("prf");
+        db.run(
+          "INSERT INTO prop_refs (id, prop_id, ref_image_url, created_at) VALUES (?, ?, ?, ?)",
+          refId,
+          propId,
+          img.url || img.base64 || "",
+          now
+        );
+        const ref = db.get<Record<string, unknown>>(
+          "SELECT * FROM prop_refs WHERE id = ?",
+          refId
+        );
+        if (ref) refs.push(ref);
       }
     }
+
+    const prop = db.get<Record<string, unknown>>(
+      "SELECT * FROM props WHERE id = ?",
+      propId
+    );
+
+    // Activity log
+    db.run(
+      "INSERT INTO activity_logs (id, user_id, project_id, action, details_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      generateId("log"),
+      payload.sub,
+      projectId,
+      "create_prop",
+      JSON.stringify({ propId, name }),
+      now
+    );
 
     return NextResponse.json({ prop: { ...prop, refs } }, { status: 201 });
   } catch (error) {
@@ -86,27 +109,40 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await params;
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+    const { id: projectId } = await params;
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
+    const { payload } = auth;
 
     const { searchParams } = new URL(request.url);
     const propId = searchParams.get("propId");
     if (!propId) return NextResponse.json({ error: "缺少道具ID" }, { status: 400 });
 
     const db = getDb();
-    const idx = db.props.findIndex((p) => p.id === propId);
-    if (idx === -1) return NextResponse.json({ error: "道具不存在" }, { status: 404 });
+    const prop = db.get<{ id: string; name: string }>(
+      "SELECT id, name FROM props WHERE id = ?",
+      propId
+    );
+    if (!prop) return NextResponse.json({ error: "道具不存在" }, { status: 404 });
 
-    db.props.splice(idx, 1);
-    db.propRefs = db.propRefs.filter((r) => r.propId !== propId) as any;
-    db.shotRelations = db.shotRelations.filter(
-      (r) => !(r.relationType === "prop" && r.relationId === propId)
-    ) as any;
+    db.run("DELETE FROM prop_refs WHERE prop_id = ?", propId);
+    db.run(
+      "DELETE FROM shot_relations WHERE relation_type = 'prop' AND relation_id = ?",
+      propId
+    );
+    db.run("DELETE FROM props WHERE id = ?", propId);
+
+    // Activity log
+    const now = new Date().toISOString();
+    db.run(
+      "INSERT INTO activity_logs (id, user_id, project_id, action, details_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      generateId("log"),
+      payload.sub,
+      projectId,
+      "delete_prop",
+      JSON.stringify({ propId, name: prop.name }),
+      now
+    );
 
     return NextResponse.json({ success: true });
   } catch (error) {

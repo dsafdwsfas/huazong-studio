@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyToken } from "@/lib/auth";
+import { requireAuth } from "@/lib/auth";
+import { generateId } from "@/lib/id";
 import { getDb } from "@/lib/db-store";
 import { extractStyleFromImages } from "@/lib/style-extractor";
 
@@ -10,19 +11,18 @@ export async function GET(
 ) {
   try {
     const { id: projectId } = await params;
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
 
     const db = getDb();
-    const project = db.projects.find((p) => p.id === projectId);
+    const project = db.get<{ style_guide_json: string | null }>(
+      "SELECT style_guide_json FROM projects WHERE id = ?",
+      projectId
+    );
     if (!project) return NextResponse.json({ error: "项目不存在" }, { status: 404 });
 
-    const styleGuide = project.styleGuideJson
-      ? JSON.parse(project.styleGuideJson)
+    const styleGuide = project.style_guide_json
+      ? JSON.parse(project.style_guide_json)
       : null;
 
     return NextResponse.json({ styleGuide });
@@ -39,12 +39,9 @@ export async function POST(
 ) {
   try {
     const { id: projectId } = await params;
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
+    const { payload } = auth;
 
     if (payload.role !== "admin" && payload.role !== "director") {
       return NextResponse.json({ error: "需要导演或管理员权限" }, { status: 403 });
@@ -53,13 +50,15 @@ export async function POST(
     const { images, manualKeywords } = await request.json();
 
     const db = getDb();
-    const project = db.projects.find((p) => p.id === projectId);
+    const project = db.get<{ id: string; style_guide_json: string | null }>(
+      "SELECT id, style_guide_json FROM projects WHERE id = ?",
+      projectId
+    );
     if (!project) return NextResponse.json({ error: "项目不存在" }, { status: 404 });
 
     let styleGuide;
 
     if (images && images.length > 0) {
-      // AI extraction from images
       const apiKey = process.env.GEMINI_API_KEY;
       const result = await extractStyleFromImages(images, apiKey);
       styleGuide = {
@@ -73,9 +72,8 @@ export async function POST(
         extractedAt: new Date().toISOString(),
       };
     } else if (manualKeywords) {
-      // Manual keywords only
-      const existing = project.styleGuideJson
-        ? JSON.parse(project.styleGuideJson)
+      const existing = project.style_guide_json
+        ? JSON.parse(project.style_guide_json)
         : {};
       styleGuide = {
         ...existing,
@@ -86,8 +84,24 @@ export async function POST(
       return NextResponse.json({ error: "请上传参考图或输入关键词" }, { status: 400 });
     }
 
-    project.styleGuideJson = JSON.stringify(styleGuide);
-    project.updatedAt = new Date().toISOString();
+    const now = new Date().toISOString();
+    db.run(
+      "UPDATE projects SET style_guide_json = ?, updated_at = ? WHERE id = ?",
+      JSON.stringify(styleGuide),
+      now,
+      projectId
+    );
+
+    // Activity log
+    db.run(
+      "INSERT INTO activity_logs (id, user_id, project_id, action, details_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      generateId("log"),
+      payload.sub,
+      projectId,
+      "extract_style",
+      JSON.stringify({ hasImages: !!(images && images.length > 0), hasManualKeywords: !!manualKeywords }),
+      now
+    );
 
     return NextResponse.json({ styleGuide });
   } catch (error) {
@@ -103,25 +117,41 @@ export async function PATCH(
 ) {
   try {
     const { id: projectId } = await params;
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
+    const { payload } = auth;
 
     const updates = await request.json();
     const db = getDb();
-    const project = db.projects.find((p) => p.id === projectId);
+    const project = db.get<{ id: string; style_guide_json: string | null }>(
+      "SELECT id, style_guide_json FROM projects WHERE id = ?",
+      projectId
+    );
     if (!project) return NextResponse.json({ error: "项目不存在" }, { status: 404 });
 
-    const existing = project.styleGuideJson
-      ? JSON.parse(project.styleGuideJson)
+    const existing = project.style_guide_json
+      ? JSON.parse(project.style_guide_json)
       : {};
 
     const merged = { ...existing, ...updates, updatedAt: new Date().toISOString() };
-    project.styleGuideJson = JSON.stringify(merged);
-    project.updatedAt = new Date().toISOString();
+    const now = new Date().toISOString();
+    db.run(
+      "UPDATE projects SET style_guide_json = ?, updated_at = ? WHERE id = ?",
+      JSON.stringify(merged),
+      now,
+      projectId
+    );
+
+    // Activity log
+    db.run(
+      "INSERT INTO activity_logs (id, user_id, project_id, action, details_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      generateId("log"),
+      payload.sub,
+      projectId,
+      "update_style",
+      JSON.stringify({ updatedKeys: Object.keys(updates) }),
+      now
+    );
 
     return NextResponse.json({ styleGuide: merged });
   } catch (error) {

@@ -1,38 +1,54 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyToken } from "@/lib/auth";
+import { requireAuth } from "@/lib/auth";
 import { generateId } from "@/lib/id";
 import { getDb } from "@/lib/db-store";
 
 /** List projects */
 export async function GET(request: NextRequest) {
   try {
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) {
-      return NextResponse.json({ error: "未登录" }, { status: 401 });
-    }
-
-    const payload = await verifyToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: "登录已过期" }, { status: 401 });
-    }
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
+    const { payload } = auth;
 
     const db = getDb();
     const { searchParams } = new URL(request.url);
     const status = searchParams.get("status");
 
-    let projects = db.projects;
+    interface ProjectRow {
+      id: string;
+      name: string;
+      description: string;
+      cover_url: string | null;
+      status: string;
+      style_guide_json: string | null;
+      created_by: string;
+      created_at: string;
+      updated_at: string;
+    }
 
-    // Filter by status
+    let projects: ProjectRow[];
     if (status && status !== "all") {
-      projects = projects.filter((p) => p.status === status);
+      projects = db.all<ProjectRow>(
+        "SELECT * FROM projects WHERE status = ?",
+        status
+      );
+    } else {
+      projects = db.all<ProjectRow>("SELECT * FROM projects");
     }
 
     // Enrich with stats
     const enriched = projects.map((p) => {
-      const shots = db.shots.filter((s) => s.projectId === p.id);
-      const totalShots = shots.length;
-      const approvedShots = shots.filter((s) => s.status === "approved" || s.status === "delivered").length;
+      const totalShots =
+        db.get<{ cnt: number }>(
+          "SELECT COUNT(*) as cnt FROM shots WHERE project_id = ?",
+          p.id
+        )?.cnt ?? 0;
+
+      const approvedShots =
+        db.get<{ cnt: number }>(
+          "SELECT COUNT(*) as cnt FROM shots WHERE project_id = ? AND status IN ('approved', 'delivered')",
+          p.id
+        )?.cnt ?? 0;
 
       return {
         ...p,
@@ -42,8 +58,12 @@ export async function GET(request: NextRequest) {
       };
     });
 
-    // Sort by updatedAt desc
-    enriched.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    // Sort by updated_at desc
+    enriched.sort(
+      (a, b) =>
+        new Date(b.updated_at).getTime() -
+        new Date(a.updated_at).getTime()
+    );
 
     return NextResponse.json({ projects: enriched });
   } catch (error) {
@@ -55,12 +75,9 @@ export async function GET(request: NextRequest) {
 /** Update project (status change, archive/unarchive) */
 export async function PATCH(request: NextRequest) {
   try {
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
+    const { payload } = auth;
 
     if (payload.role !== "admin" && payload.role !== "director") {
       return NextResponse.json({ error: "没有权限" }, { status: 403 });
@@ -70,7 +87,10 @@ export async function PATCH(request: NextRequest) {
     if (!projectId) return NextResponse.json({ error: "缺少项目ID" }, { status: 400 });
 
     const db = getDb();
-    const project = db.projects.find((p) => p.id === projectId);
+    const project = db.get<Record<string, unknown>>(
+      "SELECT * FROM projects WHERE id = ?",
+      projectId
+    );
     if (!project) return NextResponse.json({ error: "项目不存在" }, { status: 404 });
 
     if (status) {
@@ -78,13 +98,45 @@ export async function PATCH(request: NextRequest) {
       if (!VALID_STATUSES.includes(status)) {
         return NextResponse.json({ error: "无效的项目状态" }, { status: 400 });
       }
-      project.status = status;
     }
-    if (name) project.name = name;
-    if (description !== undefined) project.description = description;
-    project.updatedAt = new Date().toISOString();
 
-    return NextResponse.json({ project });
+    const now = new Date().toISOString();
+    const sets: string[] = ["updated_at = ?"];
+    const params: unknown[] = [now];
+
+    if (status) {
+      sets.push("status = ?");
+      params.push(status);
+    }
+    if (name) {
+      sets.push("name = ?");
+      params.push(name);
+    }
+    if (description !== undefined) {
+      sets.push("description = ?");
+      params.push(description);
+    }
+
+    params.push(projectId);
+    db.run(`UPDATE projects SET ${sets.join(", ")} WHERE id = ?`, ...params);
+
+    const updated = db.get<Record<string, unknown>>(
+      "SELECT * FROM projects WHERE id = ?",
+      projectId
+    );
+
+    // Activity log
+    db.run(
+      "INSERT INTO activity_logs (id, user_id, project_id, action, details_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      generateId("log"),
+      payload.sub,
+      projectId,
+      "update_project",
+      JSON.stringify({ status, name, description }),
+      now
+    );
+
+    return NextResponse.json({ project: updated });
   } catch (error) {
     console.error("Update project error:", error);
     return NextResponse.json({ error: "更新项目失败" }, { status: 500 });
@@ -94,24 +146,15 @@ export async function PATCH(request: NextRequest) {
 /** Create project */
 export async function POST(request: NextRequest) {
   try {
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) {
-      return NextResponse.json({ error: "未登录" }, { status: 401 });
-    }
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
+    const { payload } = auth;
 
-    const payload = await verifyToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: "登录已过期" }, { status: 401 });
-    }
-
-    // Only admin and director can create projects
     if (payload.role !== "admin" && payload.role !== "director") {
       return NextResponse.json({ error: "没有创建项目的权限" }, { status: 403 });
     }
 
     const { name, description } = await request.json();
-
     if (!name) {
       return NextResponse.json({ error: "项目名称不能为空" }, { status: 400 });
     }
@@ -120,27 +163,41 @@ export async function POST(request: NextRequest) {
     const now = new Date().toISOString();
     const projectId = generateId("prj");
 
-    const project = {
-      id: projectId,
+    db.run(
+      `INSERT INTO projects (id, name, description, cover_url, status, style_guide_json, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, NULL, 'active', NULL, ?, ?, ?)`,
+      projectId,
       name,
-      description: description || "",
-      coverUrl: null,
-      status: "active" as const,
-      styleGuideJson: null,
-      createdBy: payload.sub,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    db.projects.push(project);
+      description || "",
+      payload.sub,
+      now,
+      now
+    );
 
     // Add creator as project member
-    db.projectMembers.push({
+    db.run(
+      "INSERT INTO project_members (project_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)",
       projectId,
-      userId: payload.sub,
-      role: payload.role,
-      joinedAt: now,
-    });
+      payload.sub,
+      payload.role,
+      now
+    );
+
+    const project = db.get<Record<string, unknown>>(
+      "SELECT * FROM projects WHERE id = ?",
+      projectId
+    );
+
+    // Activity log
+    db.run(
+      "INSERT INTO activity_logs (id, user_id, project_id, action, details_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      generateId("log"),
+      payload.sub,
+      projectId,
+      "create_project",
+      JSON.stringify({ name }),
+      now
+    );
 
     return NextResponse.json({ project }, { status: 201 });
   } catch (error) {

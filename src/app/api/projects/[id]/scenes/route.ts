@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyToken } from "@/lib/auth";
+import { requireAuth } from "@/lib/auth";
 import { generateId } from "@/lib/id";
 import { getDb } from "@/lib/db-store";
 
@@ -10,18 +10,21 @@ export async function GET(
 ) {
   try {
     const { id: projectId } = await params;
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
 
     const db = getDb();
-    const scenesList = db.scenes.filter((s) => s.projectId === projectId);
+    const scenesList = db.all<Record<string, unknown>>(
+      "SELECT * FROM scenes WHERE project_id = ?",
+      projectId
+    );
+
     const result = scenesList.map((s) => ({
       ...s,
-      refs: db.sceneRefs.filter((r) => r.sceneId === s.id),
+      refs: db.all<Record<string, unknown>>(
+        "SELECT * FROM scene_refs WHERE scene_id = ?",
+        s.id
+      ),
     }));
 
     return NextResponse.json({ scenes: result });
@@ -38,41 +41,61 @@ export async function POST(
 ) {
   try {
     const { id: projectId } = await params;
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
+    const { payload } = auth;
 
     const { name, description, timeOfDay, refImages } = await request.json();
     if (!name) return NextResponse.json({ error: "场景名称不能为空" }, { status: 400 });
 
     const db = getDb();
-    const scene = {
-      id: generateId("scn"),
+    const now = new Date().toISOString();
+    const sceneId = generateId("scn");
+
+    db.run(
+      "INSERT INTO scenes (id, project_id, name, description, time_of_day, is_global, created_at) VALUES (?, ?, ?, ?, ?, 0, ?)",
+      sceneId,
       projectId,
       name,
-      description: description || null,
-      timeOfDay: timeOfDay || null,
-      isGlobal: false,
-      createdAt: new Date().toISOString(),
-    };
-    db.scenes.push(scene);
+      description || null,
+      timeOfDay || null,
+      now
+    );
 
-    const refs: any[] = [];
+    const refs: Record<string, unknown>[] = [];
     if (refImages && Array.isArray(refImages)) {
       for (const img of refImages) {
-        const ref = {
-          id: generateId("srf"),
-          sceneId: scene.id,
-          refImageUrl: img.url || img.base64 || "",
-          createdAt: new Date().toISOString(),
-        };
-        db.sceneRefs.push(ref);
-        refs.push(ref);
+        const refId = generateId("srf");
+        db.run(
+          "INSERT INTO scene_refs (id, scene_id, ref_image_url, created_at) VALUES (?, ?, ?, ?)",
+          refId,
+          sceneId,
+          img.url || img.base64 || "",
+          now
+        );
+        const ref = db.get<Record<string, unknown>>(
+          "SELECT * FROM scene_refs WHERE id = ?",
+          refId
+        );
+        if (ref) refs.push(ref);
       }
     }
+
+    const scene = db.get<Record<string, unknown>>(
+      "SELECT * FROM scenes WHERE id = ?",
+      sceneId
+    );
+
+    // Activity log
+    db.run(
+      "INSERT INTO activity_logs (id, user_id, project_id, action, details_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      generateId("log"),
+      payload.sub,
+      projectId,
+      "create_scene",
+      JSON.stringify({ sceneId, name }),
+      now
+    );
 
     return NextResponse.json({ scene: { ...scene, refs } }, { status: 201 });
   } catch (error) {
@@ -87,27 +110,40 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await params;
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+    const { id: projectId } = await params;
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
+    const { payload } = auth;
 
     const { searchParams } = new URL(request.url);
     const sceneId = searchParams.get("sceneId");
     if (!sceneId) return NextResponse.json({ error: "缺少场景ID" }, { status: 400 });
 
     const db = getDb();
-    const idx = db.scenes.findIndex((s) => s.id === sceneId);
-    if (idx === -1) return NextResponse.json({ error: "场景不存在" }, { status: 404 });
+    const scene = db.get<{ id: string; name: string }>(
+      "SELECT id, name FROM scenes WHERE id = ?",
+      sceneId
+    );
+    if (!scene) return NextResponse.json({ error: "场景不存在" }, { status: 404 });
 
-    db.scenes.splice(idx, 1);
-    db.sceneRefs = db.sceneRefs.filter((r) => r.sceneId !== sceneId) as any;
-    db.shotRelations = db.shotRelations.filter(
-      (r) => !(r.relationType === "scene" && r.relationId === sceneId)
-    ) as any;
+    db.run("DELETE FROM scene_refs WHERE scene_id = ?", sceneId);
+    db.run(
+      "DELETE FROM shot_relations WHERE relation_type = 'scene' AND relation_id = ?",
+      sceneId
+    );
+    db.run("DELETE FROM scenes WHERE id = ?", sceneId);
+
+    // Activity log
+    const now = new Date().toISOString();
+    db.run(
+      "INSERT INTO activity_logs (id, user_id, project_id, action, details_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      generateId("log"),
+      payload.sub,
+      projectId,
+      "delete_scene",
+      JSON.stringify({ sceneId, name: scene.name }),
+      now
+    );
 
     return NextResponse.json({ success: true });
   } catch (error) {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyToken } from "@/lib/auth";
+import { requireAuth } from "@/lib/auth";
 import { generateId } from "@/lib/id";
 import { getDb } from "@/lib/db-store";
 
@@ -13,12 +13,9 @@ export async function POST(
 ) {
   try {
     const { id: projectId } = await params;
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
+    const { payload } = auth;
 
     const { scriptText, useAI = false } = await request.json();
 
@@ -34,10 +31,8 @@ export async function POST(
       cameraAngle: string | null;
     }>;
 
-    if (useAI) {
-      // TODO: Call Gemini API for intelligent parsing
-      // For now, fall back to rule-based parsing
-      parsedShots = parseScriptRuleBased(scriptText);
+    if (useAI && process.env.GEMINI_API_KEY) {
+      parsedShots = await parseScriptWithGemini(scriptText, process.env.GEMINI_API_KEY);
     } else {
       parsedShots = parseScriptRuleBased(scriptText);
     }
@@ -45,30 +40,44 @@ export async function POST(
     // Save to database
     const db = getDb();
     const now = new Date().toISOString();
-    const savedShots = [];
+    const savedShots: Record<string, unknown>[] = [];
 
     for (const parsed of parsedShots) {
-      const shot = {
-        id: generateId("sht"),
+      const shotId = generateId("sht");
+      db.run(
+        `INSERT INTO shots (id, project_id, shot_number, scene_description, dialogue, duration_seconds, camera_angle, status, assignee_id, sort_order, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_upload', NULL, ?, ?, ?)`,
+        shotId,
         projectId,
-        shotNumber: parsed.shotNumber,
-        sceneDescription: parsed.sceneDescription,
-        dialogue: parsed.dialogue,
-        durationSeconds: parsed.durationSeconds,
-        cameraAngle: parsed.cameraAngle,
-        status: "pending_upload",
-        assigneeId: null,
-        sortOrder: parsed.shotNumber,
-        createdAt: now,
-        updatedAt: now,
-      };
-      db.shots.push(shot);
-      savedShots.push(shot);
+        parsed.shotNumber,
+        parsed.sceneDescription,
+        parsed.dialogue,
+        parsed.durationSeconds,
+        parsed.cameraAngle,
+        parsed.shotNumber,
+        now,
+        now
+      );
+      const shot = db.get<Record<string, unknown>>(
+        "SELECT * FROM shots WHERE id = ?",
+        shotId
+      );
+      if (shot) savedShots.push(shot);
     }
 
-    // Update project
-    const project = db.projects.find((p) => p.id === projectId);
-    if (project) project.updatedAt = now;
+    // Update project updated_at
+    db.run("UPDATE projects SET updated_at = ? WHERE id = ?", now, projectId);
+
+    // Activity log
+    db.run(
+      "INSERT INTO activity_logs (id, user_id, project_id, action, details_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      generateId("log"),
+      payload.sub,
+      projectId,
+      "parse_script",
+      JSON.stringify({ shotCount: savedShots.length }),
+      now
+    );
 
     return NextResponse.json({
       shots: savedShots,
@@ -99,7 +108,6 @@ function parseScriptRuleBased(text: string) {
     cameraAngle: string | null;
   }> = [];
 
-  // Try pattern matching first
   const shotPattern =
     /^(?:镜头|shot|s|场次|场景|sc)\s*(\d+)\s*[：:.\-、]/i;
   const numberedPattern = /^(\d+)\s*[.、：:)\]\-]/;
@@ -109,9 +117,7 @@ function parseScriptRuleBased(text: string) {
 
   for (const line of lines) {
     if (!line) {
-      // Blank line might separate shots
       if (currentShot && currentShot.sceneDescription) {
-        // Check if next content looks like a new shot
         continue;
       }
       continue;
@@ -121,7 +127,6 @@ function parseScriptRuleBased(text: string) {
     const numMatch = line.match(numberedPattern);
 
     if (shotMatch || numMatch) {
-      // Save previous shot
       if (currentShot) {
         shots.push(currentShot);
       }
@@ -131,12 +136,10 @@ function parseScriptRuleBased(text: string) {
         ? line.replace(shotPattern, "").trim()
         : line.replace(numberedPattern, "").trim();
 
-      // Extract camera angle hints
       const cameraMatch = description.match(
         /[（(](.*?(?:全景|中景|近景|特写|远景|俯拍|仰拍|跟拍|推|拉|摇|移|航拍).*?)[）)]/
       );
 
-      // Extract duration hints
       const durationMatch = description.match(
         /(\d+)\s*(?:秒|s|sec)/i
       );
@@ -149,22 +152,19 @@ function parseScriptRuleBased(text: string) {
         cameraAngle: cameraMatch ? cameraMatch[1] : null,
       };
     } else if (currentShot) {
-      // Check if it's dialogue
       if (
         line.startsWith('"') ||
-        line.startsWith('"') ||
-        line.startsWith("「") ||
+        line.startsWith('\u201c') ||
+        line.startsWith("\u300c") ||
         line.match(/^[\u4e00-\u9fa5]{1,4}[：:]/)
       ) {
         currentShot.dialogue = currentShot.dialogue
           ? currentShot.dialogue + "\n" + line
           : line;
       } else {
-        // Append to description
         currentShot.sceneDescription += " " + line;
       }
     } else {
-      // First content without a shot marker — create shot
       shotCounter++;
       currentShot = {
         shotNumber: shotCounter,
@@ -176,12 +176,10 @@ function parseScriptRuleBased(text: string) {
     }
   }
 
-  // Don't forget the last shot
   if (currentShot) {
     shots.push(currentShot);
   }
 
-  // If no shots were found, split by blank lines
   if (shots.length === 0) {
     const paragraphs = text
       .split(/\n\s*\n/)
@@ -198,4 +196,69 @@ function parseScriptRuleBased(text: string) {
   }
 
   return shots;
+}
+
+/**
+ * AI-powered script parser using Gemini API.
+ */
+async function parseScriptWithGemini(
+  text: string,
+  apiKey: string,
+): Promise<Array<{
+  shotNumber: number;
+  sceneDescription: string;
+  dialogue: string | null;
+  durationSeconds: number | null;
+  cameraAngle: string | null;
+}>> {
+  const prompt = `你是一位专业的影视分镜师。请将以下剧本/分镜脚本拆解为独立的镜头卡片。
+
+对每个镜头提取：
+- shotNumber: 镜头编号（从1开始）
+- sceneDescription: 场景画面描述
+- dialogue: 台词/旁白（没有则为null）
+- durationSeconds: 预估时长秒数（没有则为null）
+- cameraAngle: 机位/景别建议（如：全景、中景、近景、特写、俯拍等，没有则为null）
+
+输出严格 JSON 数组格式，不要其他文字：
+[{"shotNumber":1,"sceneDescription":"...","dialogue":"...","durationSeconds":5,"cameraAngle":"中景"}, ...]
+
+剧本内容：
+${text}`;
+
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: "application/json" },
+        }),
+      },
+    );
+
+    if (!res.ok) throw new Error(`Gemini API error: ${res.status}`);
+
+    const data = await res.json();
+    const content = data.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
+    const parsed = JSON.parse(content);
+
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed.map((s: Record<string, unknown>, i: number) => ({
+        shotNumber: (s.shotNumber as number) || i + 1,
+        sceneDescription: (s.sceneDescription as string) || "",
+        dialogue: (s.dialogue as string) || null,
+        durationSeconds: (s.durationSeconds as number) || null,
+        cameraAngle: (s.cameraAngle as string) || null,
+      }));
+    }
+
+    // Fallback to rule-based if AI returns empty
+    return parseScriptRuleBased(text);
+  } catch (error) {
+    console.error("Gemini script parsing failed, falling back to rule-based:", error);
+    return parseScriptRuleBased(text);
+  }
 }

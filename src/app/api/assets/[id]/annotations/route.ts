@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyToken } from "@/lib/auth";
+import { requireAuth } from "@/lib/auth";
 import { generateId } from "@/lib/id";
 import { getDb } from "@/lib/db-store";
 
@@ -10,27 +10,31 @@ export async function GET(
 ) {
   try {
     const { id: assetId } = await params;
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
 
     const db = getDb();
-    const annotations = db.annotations
-      .filter((a) => a.assetId === assetId)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const annotations = db.all<Record<string, unknown>>(
+      "SELECT * FROM annotations WHERE asset_id = ? ORDER BY created_at DESC",
+      assetId
+    );
 
     const enriched = annotations.map((ann) => {
-      const annotator = db.users.find((u) => u.id === ann.annotatorId);
-      const replies = db.annotationReplies
-        .filter((r) => r.annotationId === ann.id)
-        .map((r) => {
-          const replyUser = db.users.find((u) => u.id === r.userId);
-          return { ...r, userName: replyUser?.nickname || "未知" };
-        })
-        .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      const annotator = db.get<{ nickname: string }>(
+        "SELECT nickname FROM users WHERE id = ?",
+        ann.annotator_id
+      );
+
+      const replies = db.all<Record<string, unknown>>(
+        "SELECT * FROM annotation_replies WHERE annotation_id = ? ORDER BY created_at ASC",
+        ann.id
+      ).map((r) => {
+        const replyUser = db.get<{ nickname: string }>(
+          "SELECT nickname FROM users WHERE id = ?",
+          r.user_id
+        );
+        return { ...r, userName: replyUser?.nickname || "未知" };
+      });
 
       return {
         ...ann,
@@ -53,12 +57,9 @@ export async function POST(
 ) {
   try {
     const { id: assetId } = await params;
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
+    const { payload } = auth;
 
     // Only admin and director can annotate
     if (payload.role !== "admin" && payload.role !== "director") {
@@ -73,20 +74,48 @@ export async function POST(
 
     const db = getDb();
     const now = new Date().toISOString();
+    const annotationId = generateId("ann");
 
-    const annotation = {
-      id: generateId("ann"),
+    db.run(
+      `INSERT INTO annotations (id, asset_id, canvas_data_json, text_comment, annotator_id, status, frame_timestamp_ms, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'unresolved', ?, ?, ?)`,
+      annotationId,
       assetId,
-      canvasDataJson: canvasDataJson || null,
-      textComment: textComment || "",
-      annotatorId: payload.sub,
-      status: "unresolved" as const,
-      frameTimestampMs: frameTimestampMs || null,
-      createdAt: now,
-      updatedAt: now,
-    };
+      canvasDataJson || null,
+      textComment || "",
+      payload.sub,
+      frameTimestampMs || null,
+      now,
+      now
+    );
 
-    db.annotations.push(annotation);
+    const annotation = db.get<Record<string, unknown>>(
+      "SELECT * FROM annotations WHERE id = ?",
+      annotationId
+    );
+
+    // Find the project_id for activity log via asset -> shot -> project
+    const assetInfo = db.get<{ shot_id: string }>(
+      "SELECT shot_id FROM assets WHERE id = ?",
+      assetId
+    );
+    const shotInfo = assetInfo
+      ? db.get<{ project_id: string }>(
+          "SELECT project_id FROM shots WHERE id = ?",
+          assetInfo.shot_id
+        )
+      : null;
+
+    // Activity log
+    db.run(
+      "INSERT INTO activity_logs (id, user_id, project_id, action, details_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      generateId("log"),
+      payload.sub,
+      shotInfo?.project_id || null,
+      "create_annotation",
+      JSON.stringify({ annotationId, assetId }),
+      now
+    );
 
     return NextResponse.json({ annotation }, { status: 201 });
   } catch (error) {

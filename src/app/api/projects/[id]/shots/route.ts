@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyToken } from "@/lib/auth";
+import { requireAuth } from "@/lib/auth";
 import { generateId } from "@/lib/id";
 import { getDb } from "@/lib/db-store";
 
@@ -10,41 +10,53 @@ export async function GET(
 ) {
   try {
     const { id: projectId } = await params;
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
 
     const db = getDb();
-    const project = db.projects.find((p) => p.id === projectId);
+    const project = db.get<Record<string, unknown>>(
+      "SELECT * FROM projects WHERE id = ?",
+      projectId
+    );
     if (!project) return NextResponse.json({ error: "项目不存在" }, { status: 404 });
 
-    const shots = db.shots
-      .filter((s) => s.projectId === projectId)
-      .sort((a, b) => a.sortOrder - b.sortOrder);
+    const shots = db.all<Record<string, unknown>>(
+      "SELECT * FROM shots WHERE project_id = ? ORDER BY sort_order ASC",
+      projectId
+    );
 
     // Enrich with assets and annotation counts
     const enriched = shots.map((shot) => {
-      const assets = db.assets.filter((a) => a.shotId === shot.id);
-      const latestAsset = assets.sort(
-        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      )[0];
-      const unresolvedAnnotations = db.annotations.filter(
-        (a) =>
-          assets.some((asset) => asset.id === a.assetId) &&
-          a.status !== "resolved"
-      ).length;
+      const latestAsset = db.get<Record<string, unknown>>(
+        "SELECT * FROM assets WHERE shot_id = ? ORDER BY created_at DESC LIMIT 1",
+        shot.id
+      );
 
-      const assignee = shot.assigneeId
-        ? db.users.find((u) => u.id === shot.assigneeId)
+      const assetCount =
+        db.get<{ cnt: number }>(
+          "SELECT COUNT(*) as cnt FROM assets WHERE shot_id = ?",
+          shot.id
+        )?.cnt ?? 0;
+
+      const unresolvedAnnotations =
+        db.get<{ cnt: number }>(
+          `SELECT COUNT(*) as cnt FROM annotations a
+           JOIN assets ast ON a.asset_id = ast.id
+           WHERE ast.shot_id = ? AND a.status != 'resolved'`,
+          shot.id
+        )?.cnt ?? 0;
+
+      const assignee = shot.assignee_id
+        ? db.get<{ nickname: string }>(
+            "SELECT nickname FROM users WHERE id = ?",
+            shot.assignee_id
+          )
         : null;
 
       return {
         ...shot,
         latestAsset: latestAsset || null,
-        assetCount: assets.length,
+        assetCount,
         unresolvedAnnotations,
         assigneeName: assignee?.nickname || null,
       };
@@ -64,41 +76,57 @@ export async function POST(
 ) {
   try {
     const { id: projectId } = await params;
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
+    const { payload } = auth;
 
     const db = getDb();
     const { sceneDescription, dialogue, durationSeconds, cameraAngle } =
       await request.json();
 
-    const existingShots = db.shots.filter((s) => s.projectId === projectId);
-    const nextNumber = existingShots.length + 1;
+    const existingCount =
+      db.get<{ cnt: number }>(
+        "SELECT COUNT(*) as cnt FROM shots WHERE project_id = ?",
+        projectId
+      )?.cnt ?? 0;
+
+    const nextNumber = existingCount + 1;
     const now = new Date().toISOString();
+    const shotId = generateId("sht");
 
-    const shot = {
-      id: generateId("sht"),
+    db.run(
+      `INSERT INTO shots (id, project_id, shot_number, scene_description, dialogue, duration_seconds, camera_angle, status, assignee_id, sort_order, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending_upload', NULL, ?, ?, ?)`,
+      shotId,
       projectId,
-      shotNumber: nextNumber,
-      sceneDescription: sceneDescription || "",
-      dialogue: dialogue || null,
-      durationSeconds: durationSeconds || null,
-      cameraAngle: cameraAngle || null,
-      status: "pending_upload",
-      assigneeId: null,
-      sortOrder: nextNumber,
-      createdAt: now,
-      updatedAt: now,
-    };
+      nextNumber,
+      sceneDescription || "",
+      dialogue || null,
+      durationSeconds || null,
+      cameraAngle || null,
+      nextNumber,
+      now,
+      now
+    );
 
-    db.shots.push(shot);
+    // Update project updated_at
+    db.run("UPDATE projects SET updated_at = ? WHERE id = ?", now, projectId);
 
-    // Update project updatedAt
-    const project = db.projects.find((p) => p.id === projectId);
-    if (project) project.updatedAt = now;
+    const shot = db.get<Record<string, unknown>>(
+      "SELECT * FROM shots WHERE id = ?",
+      shotId
+    );
+
+    // Activity log
+    db.run(
+      "INSERT INTO activity_logs (id, user_id, project_id, action, details_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      generateId("log"),
+      payload.sub,
+      projectId,
+      "create_shot",
+      JSON.stringify({ shotId, shotNumber: nextNumber }),
+      now
+    );
 
     return NextResponse.json({ shot }, { status: 201 });
   } catch (error) {

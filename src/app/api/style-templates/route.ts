@@ -1,31 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyToken } from "@/lib/auth";
+import { requireAuth } from "@/lib/auth";
 import { generateId } from "@/lib/id";
 import { getDb } from "@/lib/db-store";
-
-function getStyleTemplates() {
-  return getDb().styleTemplates;
-}
 
 /** List style templates */
 export async function GET(request: NextRequest) {
   try {
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
 
     const { searchParams } = new URL(request.url);
     const tag = searchParams.get("tag");
     const search = searchParams.get("q");
 
-    let templates = getStyleTemplates();
+    const db = getDb();
+
+    let templates = db.all<Record<string, unknown>>("SELECT * FROM style_templates");
 
     if (tag) {
       templates = templates.filter((t) => {
-        const tags = JSON.parse(t.tagsJson || "[]");
+        const tags = JSON.parse((t.tags_json as string) || "[]");
         return tags.includes(tag);
       });
     }
@@ -33,15 +27,17 @@ export async function GET(request: NextRequest) {
     if (search) {
       templates = templates.filter(
         (t) =>
-          t.name.includes(search) ||
-          t.description.includes(search) ||
-          t.keywordsJson.includes(search)
+          (t.name as string).includes(search) ||
+          ((t.description as string) || "").includes(search) ||
+          ((t.keywords_json as string) || "").includes(search)
       );
     }
 
     // Sort by newest first
     templates.sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      (a, b) =>
+        new Date(b.created_at as string).getTime() -
+        new Date(a.created_at as string).getTime()
     );
 
     return NextResponse.json({ templates });
@@ -54,12 +50,9 @@ export async function GET(request: NextRequest) {
 /** Create style template */
 export async function POST(request: NextRequest) {
   try {
-    const authHeader = request.headers.get("authorization");
-    const token = authHeader?.replace("Bearer ", "");
-    if (!token) return NextResponse.json({ error: "未登录" }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: "登录已过期" }, { status: 401 });
+    const auth = await requireAuth(request);
+    if ("error" in auth) return auth.error;
+    const { payload } = auth;
 
     const { name, tags, keywords, description, refImages, projectId } =
       await request.json();
@@ -68,20 +61,39 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "模板名称不能为空" }, { status: 400 });
     }
 
-    const templates = getStyleTemplates();
-    const template = {
-      id: generateId("stl"),
-      name,
-      tagsJson: JSON.stringify(tags || []),
-      keywordsJson: JSON.stringify(keywords || {}),
-      description: description || "",
-      refImagesJson: refImages ? JSON.stringify(refImages) : null,
-      projectId: projectId || null,
-      createdBy: payload.sub,
-      createdAt: new Date().toISOString(),
-    };
+    const db = getDb();
+    const now = new Date().toISOString();
+    const templateId = generateId("stl");
 
-    templates.push(template);
+    db.run(
+      `INSERT INTO style_templates (id, name, tags_json, keywords_json, description, ref_images_json, project_id, created_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      templateId,
+      name,
+      JSON.stringify(tags || []),
+      JSON.stringify(keywords || {}),
+      description || "",
+      refImages ? JSON.stringify(refImages) : null,
+      projectId || null,
+      payload.sub,
+      now
+    );
+
+    const template = db.get<Record<string, unknown>>(
+      "SELECT * FROM style_templates WHERE id = ?",
+      templateId
+    );
+
+    // Activity log
+    db.run(
+      "INSERT INTO activity_logs (id, user_id, project_id, action, details_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      generateId("log"),
+      payload.sub,
+      projectId || null,
+      "create_style_template",
+      JSON.stringify({ templateId, name }),
+      now
+    );
 
     return NextResponse.json({ template }, { status: 201 });
   } catch (error) {
