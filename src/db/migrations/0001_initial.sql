@@ -8,8 +8,8 @@
 
 CREATE TABLE IF NOT EXISTS users (
   id            TEXT PRIMARY KEY NOT NULL,
+  email         TEXT NOT NULL,
   phone         TEXT,
-  password_hash TEXT,
   nickname      TEXT NOT NULL,
   avatar_url    TEXT,
   role          TEXT NOT NULL DEFAULT 'artist'
@@ -19,8 +19,24 @@ CREATE TABLE IF NOT EXISTS users (
   updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS users_phone_idx ON users (phone);
+CREATE UNIQUE INDEX IF NOT EXISTS users_email_idx ON users (email);
 CREATE INDEX IF NOT EXISTS users_role_idx ON users (role);
+
+-- ============================================================
+-- verification_codes
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS verification_codes (
+  id          TEXT PRIMARY KEY NOT NULL,
+  email       TEXT NOT NULL,
+  code        TEXT NOT NULL,
+  expires_at  TEXT NOT NULL,
+  used        INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS verification_codes_email_idx ON verification_codes (email);
+CREATE INDEX IF NOT EXISTS verification_codes_expires_idx ON verification_codes (expires_at);
 
 -- ============================================================
 -- invite_codes

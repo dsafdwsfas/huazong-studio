@@ -64,6 +64,9 @@ export async function POST(
     if (!fileUrl || !fileType) {
       return NextResponse.json({ error: "缺少文件信息" }, { status: 400 });
     }
+    if (!["image", "video"].includes(fileType)) {
+      return NextResponse.json({ error: "无效的文件类型，仅支持 image 或 video" }, { status: 400 });
+    }
 
     // Calculate version number
     const existingAssets = db.assets.filter((a) => a.shotId === shotId);

@@ -3,24 +3,8 @@ import { verifyToken } from "@/lib/auth";
 import { generateId } from "@/lib/id";
 import { getDb } from "@/lib/db-store";
 
-// Extend db-store for style templates
-interface StyleTemplate {
-  id: string;
-  name: string;
-  tagsJson: string;
-  keywordsJson: string;
-  description: string;
-  refImagesJson: string | null;
-  projectId: string | null;
-  createdBy: string;
-  createdAt: string;
-}
-
-// Add style templates to store if not exists
-function getStyleTemplates(): StyleTemplate[] {
-  const db = getDb() as any;
-  if (!db.styleTemplates) db.styleTemplates = [];
-  return db.styleTemplates;
+function getStyleTemplates() {
+  return getDb().styleTemplates;
 }
 
 /** List style templates */
@@ -85,7 +69,7 @@ export async function POST(request: NextRequest) {
     }
 
     const templates = getStyleTemplates();
-    const template: StyleTemplate = {
+    const template = {
       id: generateId("stl"),
       name,
       tagsJson: JSON.stringify(tags || []),

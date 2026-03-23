@@ -73,7 +73,13 @@ export async function PATCH(request: NextRequest) {
     const project = db.projects.find((p) => p.id === projectId);
     if (!project) return NextResponse.json({ error: "项目不存在" }, { status: 404 });
 
-    if (status) project.status = status;
+    if (status) {
+      const VALID_STATUSES = ["active", "completed", "archived"];
+      if (!VALID_STATUSES.includes(status)) {
+        return NextResponse.json({ error: "无效的项目状态" }, { status: 400 });
+      }
+      project.status = status;
+    }
     if (name) project.name = name;
     if (description !== undefined) project.description = description;
     project.updatedAt = new Date().toISOString();

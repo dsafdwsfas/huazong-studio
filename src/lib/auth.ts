@@ -1,11 +1,19 @@
 import { SignJWT, jwtVerify } from "jose";
+import { NextRequest, NextResponse } from "next/server";
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || "huazong-dev-secret-change-in-production"
-);
+function getJwtSecret(): Uint8Array {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error(
+      "JWT_SECRET environment variable must be set. " +
+        "Generate one with: openssl rand -base64 32"
+    );
+  }
+  return new TextEncoder().encode(secret);
+}
 
 const JWT_ISSUER = "huazong-studio";
-const JWT_EXPIRATION = "7d";
+const JWT_EXPIRATION = "24h";
 
 export interface JWTPayload {
   sub: string; // user ID
@@ -19,12 +27,12 @@ export async function createToken(payload: JWTPayload): Promise<string> {
     .setIssuer(JWT_ISSUER)
     .setIssuedAt()
     .setExpirationTime(JWT_EXPIRATION)
-    .sign(JWT_SECRET);
+    .sign(getJwtSecret());
 }
 
 export async function verifyToken(token: string): Promise<JWTPayload | null> {
   try {
-    const { payload } = await jwtVerify(token, JWT_SECRET, {
+    const { payload } = await jwtVerify(token, getJwtSecret(), {
       issuer: JWT_ISSUER,
     });
     return {
@@ -35,4 +43,23 @@ export async function verifyToken(token: string): Promise<JWTPayload | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Extract and verify auth token from request.
+ * Returns payload or error response.
+ */
+export async function requireAuth(
+  request: NextRequest
+): Promise<{ payload: JWTPayload } | { error: NextResponse }> {
+  const authHeader = request.headers.get("authorization");
+  const token = authHeader?.replace("Bearer ", "");
+  if (!token) {
+    return { error: NextResponse.json({ error: "未登录" }, { status: 401 }) };
+  }
+  const payload = await verifyToken(token);
+  if (!payload) {
+    return { error: NextResponse.json({ error: "登录已过期" }, { status: 401 }) };
+  }
+  return { payload };
 }

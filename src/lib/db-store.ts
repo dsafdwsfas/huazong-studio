@@ -5,14 +5,23 @@
 
 interface User {
   id: string;
-  phone: string;
-  passwordHash: string;
+  email: string;
+  phone: string | null;
   nickname: string;
   avatarUrl: string | null;
   role: "admin" | "director" | "artist" | "readonly";
   inviteCodeUsed: string;
   createdAt: string;
   updatedAt: string;
+}
+
+interface VerificationCode {
+  id: string;
+  email: string;
+  code: string;
+  expiresAt: string;
+  used: boolean;
+  createdAt: string;
 }
 
 interface InviteCode {
@@ -171,8 +180,43 @@ interface CreditLog {
   loggedAt: string;
 }
 
-interface DbStore {
+interface StyleTemplate {
+  id: string;
+  name: string;
+  tagsJson: string;
+  keywordsJson: string;
+  description: string;
+  refImagesJson: string | null;
+  projectId: string | null;
+  createdBy: string;
+  createdAt: string;
+}
+
+interface Prompt {
+  id: string;
+  title: string;
+  content: string;
+  format: "text" | "json";
+  tagsJson: string;
+  previewImageUrl: string | null;
+  usageCount: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface ActivityLog {
+  id: string;
+  userId: string;
+  projectId: string | null;
+  action: string;
+  detailsJson: string | null;
+  createdAt: string;
+}
+
+export interface DbStore {
   users: User[];
+  verificationCodes: VerificationCode[];
   inviteCodes: InviteCode[];
   projects: Project[];
   projectMembers: ProjectMember[];
@@ -189,6 +233,9 @@ interface DbStore {
   shotRelations: ShotRelation[];
   tasks: Task[];
   creditLogs: CreditLog[];
+  styleTemplates: StyleTemplate[];
+  prompts: Prompt[];
+  activityLogs: ActivityLog[];
 }
 
 // Singleton store with seed data
@@ -200,10 +247,8 @@ export function getDb(): DbStore {
       users: [
         {
           id: "usr_admin",
-          phone: "13800000000",
-          // password: admin123
-          passwordHash:
-            "$2a$10$6KqFHo4v3sBxEz3FH3L1MOKkj3w4jGVTzJ1h5J.1j2ZrYVqQqL2jS",
+          email: process.env.ADMIN_EMAIL || "aa13568021@gmail.com",
+          phone: null,
           nickname: "管理员",
           avatarUrl: null,
           role: "admin",
@@ -212,10 +257,11 @@ export function getDb(): DbStore {
           updatedAt: new Date().toISOString(),
         },
       ],
+      verificationCodes: [],
       inviteCodes: [
         {
           id: "inv_seed",
-          code: "HUAZONG2026",
+          code: process.env.INVITE_CODE || "HUAZONG2026",
           createdBy: "usr_admin",
           usedBy: null,
           usedAt: null,
@@ -238,6 +284,9 @@ export function getDb(): DbStore {
       shotRelations: [],
       tasks: [],
       creditLogs: [],
+      styleTemplates: [],
+      prompts: [],
+      activityLogs: [],
     };
   }
   return store;

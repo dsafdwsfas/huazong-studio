@@ -77,10 +77,19 @@ export async function POST(
     if (!platform) return NextResponse.json({ error: "请选择平台" }, { status: 400 });
     if (!amount || amount <= 0) return NextResponse.json({ error: "请输入消耗数量" }, { status: 400 });
 
+    // Only admin/director can log credits for other users
+    let targetUserId = payload.sub;
+    if (userId && userId !== payload.sub) {
+      if (payload.role !== "admin" && payload.role !== "director") {
+        return NextResponse.json({ error: "只有管理员或导演可以为他人登记积分" }, { status: 403 });
+      }
+      targetUserId = userId;
+    }
+
     const db = getDb();
     const log = {
       id: generateId("crl"),
-      userId: userId || payload.sub,
+      userId: targetUserId,
       platform,
       amount,
       projectId,

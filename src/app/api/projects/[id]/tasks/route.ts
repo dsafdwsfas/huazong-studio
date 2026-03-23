@@ -66,6 +66,11 @@ export async function POST(
       await request.json();
     if (!title) return NextResponse.json({ error: "任务标题不能为空" }, { status: 400 });
 
+    const validPriority = priority || "medium";
+    if (!["low", "medium", "high"].includes(validPriority)) {
+      return NextResponse.json({ error: "无效的优先级" }, { status: 400 });
+    }
+
     const db = getDb();
     const now = new Date().toISOString();
     const task = {
@@ -76,7 +81,7 @@ export async function POST(
       title,
       assigneeId: assigneeId || null,
       status: "pending" as const,
-      priority: priority || "medium",
+      priority: validPriority as "low" | "medium" | "high",
       dueDate: dueDate || null,
       createdAt: now,
       updatedAt: now,
@@ -116,9 +121,21 @@ export async function PATCH(
     const task = db.tasks.find((t) => t.id === taskId);
     if (!task) return NextResponse.json({ error: "任务不存在" }, { status: 404 });
 
-    if (status) task.status = status;
+    if (status) {
+      const VALID_STATUSES = ["pending", "in_progress", "completed"];
+      if (!VALID_STATUSES.includes(status)) {
+        return NextResponse.json({ error: "无效的任务状态" }, { status: 400 });
+      }
+      task.status = status;
+    }
     if (assigneeId !== undefined) task.assigneeId = assigneeId;
-    if (priority) task.priority = priority;
+    if (priority) {
+      const VALID_PRIORITIES = ["low", "medium", "high"];
+      if (!VALID_PRIORITIES.includes(priority)) {
+        return NextResponse.json({ error: "无效的优先级" }, { status: 400 });
+      }
+      task.priority = priority;
+    }
     if (dueDate !== undefined) task.dueDate = dueDate;
     if (title) task.title = title;
     task.updatedAt = new Date().toISOString();

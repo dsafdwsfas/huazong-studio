@@ -7,7 +7,6 @@ import {
   FolderOpen,
   Library,
   Users,
-  Settings,
   LogOut,
   Palette,
   BookText,
@@ -91,9 +90,10 @@ export default function DashboardLayout({
           <NavItem href="/team" icon={<Users className="h-4 w-4" />} active={pathname.startsWith("/team")}>
             团队管理
           </NavItem>
-          <NavItem href="/settings" icon={<Settings className="h-4 w-4" />} active={pathname.startsWith("/settings")}>
+          {/* TODO: 设置页面待开发 */}
+          {/* <NavItem href="/settings" icon={<Settings className="h-4 w-4" />} active={pathname.startsWith("/settings")}>
             设置
-          </NavItem>
+          </NavItem> */}
         </nav>
 
         {/* User */}

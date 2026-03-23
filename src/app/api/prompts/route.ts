@@ -3,23 +3,8 @@ import { verifyToken } from "@/lib/auth";
 import { generateId } from "@/lib/id";
 import { getDb } from "@/lib/db-store";
 
-interface Prompt {
-  id: string;
-  title: string;
-  content: string;
-  format: "text" | "json";
-  tagsJson: string;
-  previewImageUrl: string | null;
-  usageCount: number;
-  createdBy: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-function getPrompts(): Prompt[] {
-  const db = getDb() as any;
-  if (!db.prompts) db.prompts = [];
-  return db.prompts;
+function getPrompts() {
+  return getDb().prompts;
 }
 
 /** List prompts */
@@ -113,7 +98,7 @@ export async function POST(request: NextRequest) {
     }
 
     const now = new Date().toISOString();
-    const prompt: Prompt = {
+    const prompt = {
       id: generateId("pmt"),
       title,
       content,

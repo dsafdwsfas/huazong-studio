@@ -2,19 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyToken } from "@/lib/auth";
 import { getDb } from "@/lib/db-store";
 
-interface ActivityLog {
-  id: string;
-  userId: string;
-  projectId: string | null;
-  action: string;
-  detailsJson: string | null;
-  createdAt: string;
-}
-
-function getActivityLogs(): ActivityLog[] {
-  const db = getDb() as any;
-  if (!db.activityLogs) db.activityLogs = [];
-  return db.activityLogs;
+function getActivityLogs() {
+  return getDb().activityLogs;
 }
 
 /** List activity logs (admin only) */
@@ -41,7 +30,7 @@ export async function GET(request: NextRequest) {
 
     if (projectId) logs = logs.filter((l) => l.projectId === projectId);
     if (userId) logs = logs.filter((l) => l.userId === userId);
-    if (action) logs = logs.filter((l) => l.action.includes(action));
+    if (action) logs = logs.filter((l) => l.action === action);
 
     // Sort newest first
     logs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());

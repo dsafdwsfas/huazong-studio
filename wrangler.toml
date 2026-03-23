@@ -8,13 +8,15 @@ ENVIRONMENT = "production"
 [[d1_databases]]
 binding = "DB"
 database_name = "huazong-studio"
-database_id = "" # Fill after creating D1 database
+database_id = "d416c2c7-62e4-4d3f-943a-7d4bb890ffae"
 
-[[r2_buckets]]
-binding = "ASSETS"
-bucket_name = "huazong-assets"
+# R2 暂未开通（需外币卡），资产上传后续接入国内 OSS
+# [[r2_buckets]]
+# binding = "ASSETS"
+# bucket_name = "huazong-assets"
 
-[durable_objects]
-bindings = [
-  { name = "COLLAB", class_name = "CollabDurableObject" }
-]
+# Durable Objects 暂未使用，部署时先注释避免报错
+# [durable_objects]
+# bindings = [
+#   { name = "COLLAB", class_name = "CollabDurableObject" }
+# ]

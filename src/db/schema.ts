@@ -23,8 +23,8 @@ export const users = sqliteTable(
   "users",
   {
     id: id(),
+    email: text("email").notNull(),
     phone: text("phone"),
-    passwordHash: text("password_hash"),
     nickname: text("nickname").notNull(),
     avatarUrl: text("avatar_url"),
     role: text("role", { enum: ["admin", "director", "artist", "readonly"] })
@@ -35,8 +35,28 @@ export const users = sqliteTable(
     updatedAt: updatedAt(),
   },
   (t) => [
-    uniqueIndex("users_phone_idx").on(t.phone),
+    uniqueIndex("users_email_idx").on(t.email),
     index("users_role_idx").on(t.role),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// verification_codes
+// ---------------------------------------------------------------------------
+
+export const verificationCodes = sqliteTable(
+  "verification_codes",
+  {
+    id: id(),
+    email: text("email").notNull(),
+    code: text("code").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    used: integer("used", { mode: "boolean" }).notNull().default(false),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("verification_codes_email_idx").on(t.email),
+    index("verification_codes_expires_idx").on(t.expiresAt),
   ],
 );
 
