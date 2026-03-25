@@ -18,7 +18,11 @@ def configure_api_from_blueprint(blueprint, route_tuples, decorators=None):
     }
 
     for route_tuple in route_tuples:
-        (path, resource) = route_tuple
-        api.add_resource(resource, path)
+        if len(route_tuple) == 3:
+            path, resource, endpoint = route_tuple
+            api.add_resource(resource, path, endpoint=endpoint)
+        else:
+            (path, resource) = route_tuple
+            api.add_resource(resource, path)
 
     return api

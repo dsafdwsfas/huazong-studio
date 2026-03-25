@@ -104,7 +104,7 @@ routes = [
     ),
     ("/data/global-assets/search/facets", AssetSearchFacetsResource),
     ("/data/global-assets/search/reindex", AssetSearchIndexResource),
-    ("/data/global-assets/search/index-status", AssetSearchIndexResource),
+    ("/data/global-assets/search/index-status", AssetSearchIndexResource, "assetsearchindexstatus"),
     # Asset stats dashboard (must precede <asset_id> routes)
     ("/data/asset-stats/dashboard", AssetDashboardResource),
     (
@@ -247,7 +247,7 @@ routes = [
     ),
     ("/data/asset-nodes/<node_id>", AssetNodeResource),
     ("/data/asset-node-links", AssetNodeLinkResource),
-    ("/data/asset-node-links/<link_id>", AssetNodeLinkResource),
+    ("/data/asset-node-links/<link_id>", AssetNodeLinkResource, "assetnodelinkdetail"),
 ]
 
 blueprint = Blueprint("global_assets", "global_assets")

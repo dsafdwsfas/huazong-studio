@@ -193,6 +193,7 @@ routes = [
     (
         "/data/projects/<project_id>/storyboard/sequences/<sequence_id>",
         StoryboardSequenceResource,
+        "storyboardsequencedetail",
     ),
     (
         "/data/projects/<project_id>/storyboard/shots/<shot_id>/versions",
@@ -238,6 +239,7 @@ routes = [
     (
         "/data/shots/<shot_id>/annotations/frames/<int:frame_number>",
         VideoFrameAnnotationResource,
+        "videoframeannotationdetail",
     ),
     (
         "/data/shots/<shot_id>/annotations/audio-markers",
@@ -246,6 +248,7 @@ routes = [
     (
         "/data/shots/<shot_id>/annotations/audio-markers/<int:marker_index>",
         AudioMarkerResource,
+        "audiomarkerdetail",
     ),
     (
         "/data/projects/<project_id>/storyboard/shots/<shot_id>/reviews",
@@ -290,6 +293,7 @@ routes = [
     (
         "/data/projects/<project_id>/storyboard/style-references/<preview_file_id>",
         StyleReferenceResource,
+        "stylereferencedetail",
     ),
     (
         "/data/projects/<project_id>/storyboard/style-templates",
