@@ -9,8 +9,8 @@ __pycache__/
 .venv/
 venv/
 
-# Build artifacts
-kitsu-frontend/dist/
+# Build artifacts (dist 需要推送，服务器 2C2G 无法构建)
+# kitsu-frontend/dist/  — 保留在仓库中
 kitsu-frontend/node_modules/
 kitsu-zou/*.egg-info/
 
