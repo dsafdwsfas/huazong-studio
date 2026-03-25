@@ -1,0 +1,2 @@
+import{_ as n,o as a,c as d,d as t,t as s}from"./index-A_ef7tka.js";const r="/assets/404-VtGghZp-.png",l={name:"not-found"},c={class:"not-found page has-text-centered"},i={class:"title"},p={href:"/"};function _(o,e,u,f,m,h){return a(),d("div",c,[e[0]||(e[0]=t("img",{class:"illustration",src:r},null,-1)),t("h1",i,s(o.$t("not_found.title")),1),t("p",null,s(o.$t("not_found.text")),1),t("p",null,[t("a",p,s(o.$t("main.home")),1)])])}const g=n(l,[["render",_],["__scopeId","data-v-dfbe1ba6"]]);export{g as default};
+//# sourceMappingURL=NotFound-ddundiCl.js.map

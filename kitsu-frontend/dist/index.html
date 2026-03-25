@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="画宗科技是专业的影视制片资产管理平台，支持分镜管理、风格锁定、资产库和多项目协作" />
+    <title>画宗科技 - 影视制片资产管理平台</title>
+    <link rel="preload" href="/api/config" as="fetch" crossorigin />
+    <link rel="icon" href="/favicon.ico" />
+    <link rel="manifest" href="/manifest.json" />
+    <script type="module" crossorigin src="/assets/index-A_ef7tka.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-DklqjOcj.css">
+  </head>
+  <body>
+    <noscript>
+      <strong>
+        We're sorry but 画宗科技 doesn't work properly without JavaScript enabled.
+        Please enable it to continue.
+      </strong>
+    </noscript>
+    <div id="app"></div>
+    <script>
+      // PWA Service Worker 注册
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/service-worker.js')
+            .then((reg) => console.log('[PWA] SW registered:', reg.scope))
+            .catch((err) => console.warn('[PWA] SW registration failed:', err))
+        })
+      }
+    </script>
+  </body>
+</html>
