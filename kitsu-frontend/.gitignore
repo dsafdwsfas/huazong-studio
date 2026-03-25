@@ -39,7 +39,7 @@ yarn.lock
 
 # Vue template artifacts to ignore
 .DS_Store
-dist/
+# dist/ — included for server deployment
 selenium-debug.log
 test/unit/coverage
 test/e2e/reports
