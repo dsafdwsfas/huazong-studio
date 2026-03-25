@@ -27,7 +27,7 @@ from zou.app.services import style_lock_service
 from zou.app.services import style_report_service
 from zou.app.services import style_translation_service
 from zou.app.stores import file_store
-from zou.app.utils.api import WrongParameterException
+from zou.app.services.exception import WrongParameterException
 
 logger = logging.getLogger(__name__)
 

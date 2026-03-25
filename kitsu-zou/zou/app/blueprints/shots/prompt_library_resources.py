@@ -16,7 +16,7 @@ from zou.app.services import (
     user_service,
 )
 from zou.app.services import prompt_library_service
-from zou.app.utils.api import WrongParameterException
+from zou.app.services.exception import WrongParameterException
 
 logger = logging.getLogger(__name__)
 
