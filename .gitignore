@@ -1,0 +1,38 @@
+# Environment
+.env
+.env.local
+
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Build artifacts
+kitsu-frontend/dist/
+kitsu-frontend/node_modules/
+kitsu-zou/*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backups (local)
+backups/
+
+# Claude Code internal
+.claude/worktrees/
+.worktrees/
+SESSION.md
+
+# Docker volumes
+pgdata/
+redis_data/
+
+# SSL certs (generated on server)
+nginx/ssl/

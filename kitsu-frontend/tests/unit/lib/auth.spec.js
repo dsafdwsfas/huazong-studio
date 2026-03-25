@@ -1,0 +1,10 @@
+import auth from '@/lib/auth'
+
+describe('auth', () => {
+  test('isPasswordValid', () => {
+    expect(auth.isPasswordValid('', '')).toBeFalsy()
+    expect(auth.isPasswordValid('abc', 'abc')).toBeFalsy()
+    expect(auth.isPasswordValid('abcdefgh', 'abc')).toBeFalsy()
+    expect(auth.isPasswordValid('abcdefgh', 'abcdefgh')).toBeTruthy()
+  })
+})

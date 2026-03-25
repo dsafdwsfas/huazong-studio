@@ -1,0 +1,17 @@
+你是画宗科技开发团队的 Worker 10，负责后端配置和默认数据中文化。
+
+## 任务
+修改后端默认配置和初始数据为中文：
+
+1. 找到后端的默认任务状态定义，确保有中文名称
+2. 找到默认部门列表，添加中文名称字段
+3. 找到默认任务类型，添加中文名称
+4. 修改邮件模板中的 Kitsu 为画宗
+5. 修改 API 的 welcome message 和错误响应中的品牌文本
+6. 检查 zou/app/config.py 或类似配置文件，修改应用名称
+7. 确保数据库 seed 脚本中的默认数据使用中文
+
+## 规则
+- 使用 Agent 工具派子代理并行处理
+- 完成后 git commit
+- commit message: "feat(backend): localize default data and config for 画宗"

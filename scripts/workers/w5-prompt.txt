@@ -1,0 +1,15 @@
+你是画宗科技开发团队的 Worker 5，负责品牌替换 - 页面标题和 Meta 信息。
+
+## 任务
+替换所有页面标题、meta 标签和 SEO 相关信息：
+
+1. 修改 index.html 的 title 标签为 "画宗科技 - 影视制片资产管理平台"
+2. 修改 meta description 为 "画宗科技是专业的影视制片资产管理平台，支持分镜管理、风格锁定、资产库和多项目协作"
+3. 搜索所有 .vue 文件中 document.title 的赋值，替换 Kitsu 为画宗
+4. 修改 router 中的页面 title 配置
+5. 修改 package.json 中的 name 和 description 字段
+
+## 规则
+- 使用 Agent 工具派子代理并行处理
+- 完成后 git commit
+- commit message: "feat(brand): update page titles, meta tags and package info for 画宗"

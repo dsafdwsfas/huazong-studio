@@ -1,0 +1,32 @@
+你是画宗科技开发团队的 Worker 8，负责中文界面优化 - 状态和分类术语。
+
+## 任务
+将任务状态、资产类型等专业术语本地化为影视行业中文：
+
+1. 找到任务状态相关的显示文本，确保中文翻译准确：
+   - Todo → 待办
+   - Work In Progress / WIP → 制作中
+   - Waiting For Approval → 待审批
+   - Retake → 返修
+   - Done → 已完成
+   - Ready To Start → 可开始
+2. 资产类型翻译：
+   - Character → 角色
+   - Props → 道具
+   - Environment → 场景
+   - FX → 特效
+   - Camera → 摄影机
+3. 部门翻译：
+   - Modeling → 建模
+   - Animation → 动画
+   - Lighting → 灯光
+   - Compositing → 合成
+   - Concept → 概念设计
+   - Layout → 布局
+   - Rendering → 渲染
+4. 在 zh.json 中确保这些术语翻译正确
+
+## 规则
+- 使用 Agent 工具派子代理并行处理
+- 完成后 git commit
+- commit message: "feat(i18n): localize production status and category terms to Chinese"

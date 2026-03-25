@@ -1,0 +1,248 @@
+{
+  "project": {
+    "name": "画宗制片中枢",
+    "code": "huazong-studio",
+    "repo_root": "D:\\claude\\bot-01\\workspace\\kitsu-frontend",
+    "api_root": "D:\\claude\\bot-01\\workspace\\kitsu-zou",
+    "worktree_base": "D:\\claude\\bot-01\\workspace\\.worktrees"
+  },
+  "workers": [
+    { "id": "w1",  "role": "frontend-lead-a",   "name": "前端主力A",  "focus": "Vue组件/页面布局" },
+    { "id": "w2",  "role": "frontend-lead-b",   "name": "前端主力B",  "focus": "交互/动效/标注" },
+    { "id": "w3",  "role": "backend-lead-a",    "name": "后端主力A",  "focus": "Flask API开发" },
+    { "id": "w4",  "role": "backend-lead-b",    "name": "后端主力B",  "focus": "数据模型/迁移" },
+    { "id": "w5",  "role": "integration",       "name": "集成工程师",  "focus": "前后端联调" },
+    { "id": "w6",  "role": "testing",           "name": "测试工程师",  "focus": "自动化测试" },
+    { "id": "w7",  "role": "frontend-support",  "name": "前端辅助",   "focus": "CSS/i18n/响应式" },
+    { "id": "w8",  "role": "backend-support",   "name": "后端辅助",   "focus": "异步任务/文件处理" },
+    { "id": "w9",  "role": "devops",            "name": "运维工程师",  "focus": "Docker/部署/CI" },
+    { "id": "w10", "role": "ai-engineer",       "name": "AI工程师",   "focus": "Gemini API/风格引擎" }
+  ],
+  "phases": [
+    {
+      "id": "phase-1",
+      "name": "基础改造与品牌重塑",
+      "features": [
+        {
+          "id": "1.1",
+          "name": "品牌重塑与汉化",
+          "workers": ["w1", "w7", "w3"],
+          "subtasks": {
+            "w1": "替换Logo、Favicon、品牌色、登录页重设计",
+            "w7": "全量中文翻译、i18n文件补全、翻译覆盖率>95%",
+            "w3": "邮件模板汉化、API返回文案替换"
+          }
+        },
+        {
+          "id": "1.2",
+          "name": "部署架构搭建",
+          "workers": ["w9", "w3", "w4"],
+          "subtasks": {
+            "w9": "Docker Compose编排、Nginx配置、SSL证书",
+            "w3": "Gunicorn配置、Flask生产模式、环境变量",
+            "w4": "PostgreSQL初始化脚本、Redis配置"
+          }
+        },
+        {
+          "id": "1.3",
+          "name": "用户认证改造",
+          "workers": ["w1", "w3", "w5"],
+          "subtasks": {
+            "w1": "登录页UI改造（企业微信/钉钉扫码+手机号登录）",
+            "w3": "OAuth回调、Token发放、企业微信/钉钉SDK集成",
+            "w5": "认证流程联调、角色同步测试"
+          }
+        },
+        {
+          "id": "1.4",
+          "name": "存储层改造（COS）",
+          "workers": ["w3", "w1", "w8"],
+          "subtasks": {
+            "w3": "腾讯云COS SDK集成、file_store.py改造",
+            "w1": "前端分片上传组件、进度条、断点续传UI",
+            "w8": "CDN配置、预签名URL生成、缩略图服务"
+          }
+        },
+        {
+          "id": "1.5",
+          "name": "数据库迁移",
+          "workers": ["w4", "w9"],
+          "subtasks": {
+            "w4": "腾讯云PostgreSQL连接配置、Alembic迁移验证、连接池",
+            "w9": "自动备份脚本、数据库监控、读写分离配置"
+          }
+        },
+        {
+          "id": "1.6",
+          "name": "项目管理界面适配",
+          "workers": ["w1", "w3", "w5"],
+          "subtasks": {
+            "w1": "隐藏Budget/SalaryScale/Hardware页面、路由调整、仪表盘UI",
+            "w3": "仪表盘统计API（进度/分镜完成率/资产统计）",
+            "w5": "项目模板功能（快速创建同类型项目）"
+          }
+        },
+        {
+          "id": "1.7",
+          "name": "文件上传系统增强",
+          "workers": ["w1", "w8", "w3"],
+          "subtasks": {
+            "w1": "拖拽上传、粘贴上传、文件夹上传、上传队列UI",
+            "w8": "格式解析（PSD/AI/EXR）、缩略图生成服务",
+            "w3": "上传API增强、并发控制、格式白名单"
+          }
+        },
+        {
+          "id": "1.8",
+          "name": "权限系统细化",
+          "workers": ["w3", "w1"],
+          "subtasks": {
+            "w3": "三级权限模型（角色+项目+资产）、权限中间件",
+            "w1": "权限UI、条件渲染、角色管理界面"
+          }
+        },
+        {
+          "id": "1.9",
+          "name": "实时协作增强",
+          "workers": ["w3", "w1", "w6"],
+          "subtasks": {
+            "w3": "Socket.io集群（Redis Adapter）、在线状态服务、乐观锁",
+            "w1": "在线状态UI、协作光标、实时通知组件",
+            "w6": "50并发压测脚本、WebSocket稳定性测试"
+          }
+        },
+        {
+          "id": "1.10",
+          "name": "移动端适配",
+          "workers": ["w7", "w1"],
+          "subtasks": {
+            "w7": "响应式CSS、Bulma断点适配、关键页面手机布局",
+            "w1": "PWA Service Worker、离线缓存、推送通知"
+          }
+        }
+      ]
+    },
+    {
+      "id": "phase-2",
+      "name": "分镜管理与标注系统",
+      "features": [
+        {
+          "id": "2.1", "name": "分镜瀑布流面板",
+          "workers": ["w1", "w2", "w3", "w4"],
+          "subtasks": {
+            "w1": "瀑布流/网格布局组件、虚拟滚动、场景分组",
+            "w2": "分镜卡片组件、拖拽排序、快捷键导航",
+            "w3": "分镜列表API、分页查询、排序筛选接口",
+            "w4": "分镜数据模型增强（场景关联、排序字段）"
+          }
+        },
+        {
+          "id": "2.2", "name": "分镜标注系统",
+          "workers": ["w2", "w1", "w3"],
+          "subtasks": {
+            "w2": "Fabric.js画布增强（画笔/矩形/箭头/文字/标记点/测量）",
+            "w1": "标注工具栏UI、颜色选择器、图层面板",
+            "w3": "标注数据存储API、版本管理"
+          }
+        },
+        {
+          "id": "2.3", "name": "分镜负责人与状态流转",
+          "workers": ["w1", "w3"],
+          "subtasks": {
+            "w1": "负责人分配UI、状态流转可视化、批量分配",
+            "w3": "负责人API、状态机、自动通知"
+          }
+        },
+        {
+          "id": "2.4", "name": "场景管理",
+          "workers": ["w1", "w4"],
+          "subtasks": {
+            "w1": "场景树形结构UI、场景→分镜层级展示",
+            "w4": "场景数据模型、层级关系API"
+          }
+        },
+        {
+          "id": "2.5", "name": "分镜版本管理",
+          "workers": ["w1", "w3"],
+          "subtasks": {
+            "w1": "版本历史UI、差异对比、回滚操作",
+            "w3": "版本存储、差异计算API"
+          }
+        },
+        {
+          "id": "2.6", "name": "分镜批量操作",
+          "workers": ["w1", "w8"],
+          "subtasks": {
+            "w1": "批量选择、批量上传/下载UI、导出格式选择",
+            "w8": "批量打包下载、ZIP生成、异步导出队列"
+          }
+        },
+        {
+          "id": "2.7", "name": "分镜时间线视图",
+          "workers": ["w2", "w3"],
+          "subtasks": {
+            "w2": "横向时间轴组件、缩放/拖拽、里程碑标记",
+            "w3": "时间线数据API、排期计算"
+          }
+        },
+        {
+          "id": "2.8", "name": "视频分镜支持",
+          "workers": ["w2", "w8"],
+          "subtasks": {
+            "w2": "视频预览播放器、帧标注（时间点+画面标注）",
+            "w8": "视频转码服务、帧提取、预览生成"
+          }
+        },
+        {
+          "id": "2.9", "name": "音频分镜支持",
+          "workers": ["w2", "w8"],
+          "subtasks": {
+            "w2": "Wavesurfer.js波形可视化、标记点、区间选择",
+            "w8": "音频格式转换、波形数据预生成"
+          }
+        },
+        {
+          "id": "2.10", "name": "分镜评审工作流",
+          "workers": ["w1", "w3", "w5"],
+          "subtasks": {
+            "w1": "评审面板UI（提交→审核→通过/打回）、批注汇总",
+            "w3": "评审状态机API、审核记录、通知触发",
+            "w5": "评审流程端到端联调"
+          }
+        }
+      ]
+    },
+    {
+      "id": "phase-3",
+      "name": "AI风格引擎与智能资产",
+      "features": [
+        { "id": "3.1", "name": "Gemini API集成", "workers": ["w10", "w3"], "subtasks": { "w10": "Gemini 2.5 Pro SDK封装、图片分析Prompt设计、异步调用", "w3": "分析任务队列、结果缓存、WebSocket结果推送" } },
+        { "id": "3.2", "name": "风格元数据提取", "workers": ["w10", "w4"], "subtasks": { "w10": "JSON Schema定义、提取准确度调优、多图融合分析", "w4": "AIAnalysisResult数据模型、索引优化" } },
+        { "id": "3.3", "name": "风格关键词翻译", "workers": ["w10", "w7"], "subtasks": { "w10": "英→中翻译Prompt、术语表维护、自然语言润色", "w7": "关键词展示UI、中英双语切换" } },
+        { "id": "3.4", "name": "风格锁定面板", "workers": ["w1", "w10", "w3"], "subtasks": { "w1": "风格锁定面板UI（参考图+提取结果+锁定操作）", "w10": "多图风格融合算法、一致性评分", "w3": "StyleProfile模型、锁定/解锁API" } },
+        { "id": "3.5", "name": "风格模板库", "workers": ["w1", "w3"], "subtasks": { "w1": "模板库浏览UI、保存/复用/共享操作", "w3": "模板CRUD API、项目间共享权限" } },
+        { "id": "3.6", "name": "提示词管理系统", "workers": ["w1", "w4", "w3"], "subtasks": { "w1": "提示词编辑器UI（分类/标签/搜索/版本）", "w4": "PromptTemplate数据模型、全文搜索索引", "w3": "提示词CRUD API、版本管理" } },
+        { "id": "3.7", "name": "镜头语言库", "workers": ["w1", "w4"], "subtasks": { "w1": "镜头语言浏览UI（景别/运镜/构图术语卡片）", "w4": "CameraLanguage模型、预置数据导入" } },
+        { "id": "3.8", "name": "AI批量分析", "workers": ["w10", "w8"], "subtasks": { "w10": "批量分析任务编排、并发限流、失败重试", "w8": "Redis队列消费者、进度追踪、结果聚合" } },
+        { "id": "3.9", "name": "风格一致性检查", "workers": ["w10", "w1"], "subtasks": { "w10": "新图vs锁定风格对比算法、偏差评分", "w1": "一致性检查结果UI、偏差高亮" } },
+        { "id": "3.10", "name": "风格报告导出", "workers": ["w1", "w8"], "subtasks": { "w1": "报告预览UI、导出格式选择", "w8": "PDF/Markdown生成服务" } }
+      ]
+    },
+    {
+      "id": "phase-4",
+      "name": "永久资产库与智能节点",
+      "features": [
+        { "id": "4.1", "name": "全局资产库", "workers": ["w1", "w4", "w3"], "subtasks": { "w1": "资产库浏览UI（网格/列表视图、筛选排序）", "w4": "GlobalAsset数据模型、跨项目关联", "w3": "资产CRUD API、批量操作" } },
+        { "id": "4.2", "name": "资产分类体系", "workers": ["w1", "w4"], "subtasks": { "w1": "分类树UI（人物/场景/道具/特效/音乐）、标签管理", "w4": "分类模型、标签索引、层级关系" } },
+        { "id": "4.3", "name": "智能节点系统", "workers": ["w2", "w4", "w3"], "subtasks": { "w2": "Cytoscape.js节点图谱可视化、交互操作", "w4": "AssetNode/AssetNodeLink模型、图遍历查询", "w3": "节点关系API、自动关联算法" } },
+        { "id": "4.4", "name": "资产搜索引擎", "workers": ["w3", "w1", "w10"], "subtasks": { "w3": "MeiliSearch索引增强、全文+标签搜索", "w1": "搜索UI（即时搜索、筛选面板）", "w10": "AI语义搜索（Gemini embedding相似度）" } },
+        { "id": "4.5", "name": "资产版本管理", "workers": ["w1", "w3"], "subtasks": { "w1": "版本历史UI、差异对比视图", "w3": "版本存储API、差异计算" } },
+        { "id": "4.6", "name": "资产复用追踪", "workers": ["w1", "w3"], "subtasks": { "w1": "复用关系图UI（哪些项目用了此资产）", "w3": "AssetUsage模型、使用统计API" } },
+        { "id": "4.7", "name": "资产统计看板", "workers": ["w1", "w3"], "subtasks": { "w1": "统计看板UI（Chart.js图表、热度排行、存储占用）", "w3": "统计聚合API、定时计算任务" } },
+        { "id": "4.8", "name": "资产导入导出", "workers": ["w1", "w8"], "subtasks": { "w1": "批量导入/导出UI、格式选择", "w8": "ZIP打包/解包、异步导出队列" } },
+        { "id": "4.9", "name": "资产审核工作流", "workers": ["w1", "w3"], "subtasks": { "w1": "审核面板UI（上传→审核→入库流程）", "w3": "审核状态机API、审批记录" } },
+        { "id": "4.10", "name": "资产API开放接口", "workers": ["w3", "w9"], "subtasks": { "w3": "RESTful开放API、API Key认证、限流", "w9": "API文档（Swagger）、SDK生成" } }
+      ]
+    }
+  ]
+}

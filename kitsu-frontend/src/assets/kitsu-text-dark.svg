@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 120">
+  <rect x="10" y="20" width="80" height="80" rx="14" fill="#e94560"/>
+  <rect x="15" y="25" width="70" height="70" rx="10" fill="#c73350"/>
+  <text x="50" y="78" font-family="serif" font-size="52" font-weight="bold" text-anchor="middle" fill="#ffffff">画</text>
+  <text x="240" y="82" font-family="serif" font-size="70" font-weight="bold" text-anchor="middle" fill="#ffffff">画宗</text>
+  <rect x="105" y="92" width="190" height="4" rx="2" fill="#e94560" opacity="0.7"/>
+</svg>

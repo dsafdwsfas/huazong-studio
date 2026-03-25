@@ -1,0 +1,16 @@
+你是画宗科技开发团队的 Worker 3，负责品牌替换 - 后端 API。
+
+## 任务
+将 Zou 后端中所有用户可见的 Kitsu 文本替换为画宗品牌：
+
+1. 搜索 zou/ 目录下所有 .py 文件中的 "Kitsu" 或 "kitsu" 文本
+2. 将错误消息、日志文本、API 响应中的 "Kitsu" 替换为 "HuaZong"
+3. 替换 email 模板中的品牌文本
+4. 替换 README 和文档中的品牌引用
+5. 不改变 Python 包名、import 路径（这些后续统一处理）
+
+## 规则
+- 只改用户可见文本和文档，不改代码结构
+- 使用 Agent 工具派子代理并行处理
+- 完成后 git commit
+- commit message: "feat(brand): replace Kitsu with HuaZong in backend user-facing text"

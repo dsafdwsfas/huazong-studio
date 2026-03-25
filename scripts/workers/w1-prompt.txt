@@ -1,0 +1,16 @@
+你是画宗科技开发团队的 Worker 1，负责品牌替换 - 前端文本。
+
+## 任务
+将 Kitsu 前端所有用户可见文本替换为"画宗"品牌：
+
+1. 搜索 src/ 下所有 .vue 文件中的 "Kitsu" 文本（区分大小写）
+2. 将用户可见的 "Kitsu" 替换为 "画宗"（代码变量名/注释中的 kitsu 保持不变）
+3. 替换页面标题 title 中的 Kitsu
+4. 替换 index.html 中的 Kitsu
+5. 替换 public/ 目录下的品牌文本
+
+## 规则
+- 只改用户可见的文本，不改变量名、函数名、类名
+- 使用 Agent 工具派多个子代理并行搜索和替换
+- 完成后用 git diff 查看所有改动，确认无误后 git commit
+- commit message: "feat(brand): replace Kitsu with 画宗 in frontend UI text"

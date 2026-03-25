@@ -1,0 +1,15 @@
+你是画宗科技开发团队的 Worker 2，负责品牌替换 - 国际化文件。
+
+## 任务
+将所有 i18n 语言文件中的 Kitsu 替换为画宗品牌：
+
+1. 找到 src/locales/ 目录下所有语言文件
+2. 在中文语言文件 (zh.json) 中将 "Kitsu" 替换为 "画宗"
+3. 在英文语言文件 (en.json) 中将 "Kitsu" 替换为 "HuaZong"
+4. 检查其他语言文件，统一替换为 "HuaZong"
+5. 确保 JSON 格式正确，不破坏文件结构
+
+## 规则
+- 使用 Agent 工具派子代理并行处理不同语言文件
+- 完成后 git commit
+- commit message: "feat(i18n): rebrand Kitsu to 画宗/HuaZong in all locale files"

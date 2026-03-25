@@ -1,0 +1,17 @@
+你是画宗科技开发团队的 Worker 4，负责品牌替换 - Logo 和视觉资产。
+
+## 任务
+替换前端的品牌 Logo 和视觉元素：
+
+1. 找到 src/assets/ 下所有 logo/品牌图片文件
+2. 找到 CSS/SCSS 中的品牌颜色定义
+3. 将主色调改为画宗品牌色: 主色 #1a1a2e, 强调色 #e94560, 辅助色 #16213e
+4. 修改 src/variables.scss 中的品牌颜色变量
+5. 创建一个简单的 SVG 文本 logo "画宗" 替换原有 logo 引用
+6. 修改 favicon 相关配置
+7. 修改 manifest.json 中的应用名称为 "画宗科技"
+
+## 规则
+- 使用 Agent 工具派子代理并行处理颜色和 logo
+- 完成后 git commit
+- commit message: "feat(brand): update logo, colors and visual assets for 画宗"

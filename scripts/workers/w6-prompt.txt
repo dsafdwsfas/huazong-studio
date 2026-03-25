@@ -1,0 +1,25 @@
+你是画宗科技开发团队的 Worker 6，负责中文界面优化 - 导航和菜单。
+
+## 任务
+将左侧导航栏和顶部菜单的所有文本本地化为中文：
+
+1. 找到侧边栏组件（通常在 src/components/sides/ 或 layouts/ 中）
+2. 确保所有导航项都使用 i18n key 而非硬编码英文
+3. 在 zh.json 中添加缺失的中文翻译
+4. 关键菜单项翻译：
+   - Productions → 制作项目
+   - Assets → 资产库
+   - Shots → 镜头
+   - Sequences → 场次
+   - Episodes → 集数
+   - Tasks → 任务
+   - Team → 团队
+   - Schedule → 排期
+   - Playlists → 审片列表
+   - News Feed → 动态
+   - Timesheets → 工时记录
+
+## 规则
+- 使用 Agent 工具派子代理并行处理不同组件
+- 完成后 git commit
+- commit message: "feat(i18n): localize navigation and menu items to Chinese"

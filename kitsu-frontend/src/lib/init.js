@@ -1,0 +1,34 @@
+import router from '@/router'
+import store from '@/store'
+
+import { DATA_LOADING_START, DATA_LOADING_END } from '@/store/mutation-types'
+
+/**
+ * Load base data required to display properly all information.
+ */
+const init = callback => {
+  store.commit(DATA_LOADING_START)
+  return store
+    .dispatch('loadContext')
+    .then(() => {
+      return store.dispatch('getOrganisation')
+    })
+    .then(() => {
+      // We run login success mutation when done because init
+      // happens either after successful login or at first connexion
+      // when the user have an active session.
+      store.commit(DATA_LOADING_END)
+      callback()
+    })
+    .catch(err => {
+      store.commit(DATA_LOADING_END)
+      if (err.status === 403) {
+        router.push({ name: 'login-2fa' })
+        return
+      }
+      console.error('An init operation failed: ', err)
+      callback(err)
+    })
+}
+
+export default init

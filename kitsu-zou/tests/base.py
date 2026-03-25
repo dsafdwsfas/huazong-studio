@@ -1,0 +1,1460 @@
+import datetime
+import unittest
+import orjson as json
+import os
+import ntpath
+import fakeredis
+
+from mixer.backend.flask import mixer
+
+from zou.app import app, db
+from zou.app.models.status_automation import StatusAutomation
+from zou.app.utils import fields, auth, fs
+from zou.app.services import (
+    breakdown_service,
+    comments_service,
+    file_tree_service,
+    tasks_service,
+    projects_service,
+)
+
+from zou.app.models.asset_instance import AssetInstance
+from zou.app.models.build_job import BuildJob
+from zou.app.models.day_off import DayOff
+from zou.app.models.department import Department
+from zou.app.models.entity import Entity
+from zou.app.models.entity_type import EntityType
+from zou.app.models.file_status import FileStatus
+from zou.app.models.metadata_descriptor import MetadataDescriptor
+from zou.app.models.milestone import Milestone
+from zou.app.models.notification import Notification
+from zou.app.models.output_file import OutputFile
+from zou.app.models.output_type import OutputType
+from zou.app.models.organisation import Organisation
+from zou.app.models.person import Person
+from zou.app.models.playlist import Playlist
+from zou.app.models.preview_background_file import PreviewBackgroundFile
+from zou.app.models.preview_file import PreviewFile
+from zou.app.models.project import Project
+from zou.app.models.project_status import ProjectStatus
+from zou.app.models.schedule_item import ScheduleItem
+from zou.app.models.subscription import Subscription
+from zou.app.models.task import Task
+from zou.app.models.task_status import TaskStatus
+from zou.app.models.task_type import TaskType
+from zou.app.models.software import Software
+from zou.app.models.working_file import WorkingFile
+from zou.app.stores import auth_tokens_store, config_store
+
+from sqlalchemy.orm import scoped_session
+from sqlalchemy.orm import sessionmaker
+from flask import current_app
+
+TEST_FOLDER = os.path.join("tests", "tmp")
+
+auth_tokens_store.revoked_tokens_store = fakeredis.FakeStrictRedis(
+    decode_responses=True
+)
+config_store.config_store = fakeredis.FakeStrictRedis(decode_responses=True)
+
+# Pre-compute the bcrypt hash once for the default test password.
+# Avoids calling bcrypt.generate_password_hash per user per test.
+_CACHED_PASSWORD_HASH = auth.encrypt_password("mypassword")
+
+
+class ApiTestCase(unittest.TestCase):
+    """
+    Set of helpers to make test development easier.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        pass
+
+    @classmethod
+    def tearDownClass(cls):
+        pass
+
+    def setUp(self):
+        """
+        Configure application before each test.
+        """
+        app.test_request_context(headers={"mimetype": "application/json"})
+        self.flask_app = app
+        self.app = app.test_client()
+        self.base_headers = {}
+        self.post_headers = {"Content-type": "application/json"}
+        app.app_context().push()
+
+        from zou.app.utils import cache
+
+        cache.clear()
+
+    def tearDown(self):
+        pass
+
+    def log_in(self, email):
+        tokens = self.post(
+            "auth/login", {"email": email, "password": "mypassword"}, 200
+        )
+        self.auth_headers = {
+            "Authorization": "Bearer %s" % tokens["access_token"]
+        }
+        self.base_headers.update(self.auth_headers)
+        self.post_headers.update(self.auth_headers)
+
+    def log_in_admin(self):
+        self.log_in(self.user["email"])
+
+    def log_in_manager(self):
+        self.log_in(self.user_manager["email"])
+
+    def log_in_cg_artist(self):
+        self.log_in(self.user_cg_artist["email"])
+
+    def log_in_client(self):
+        self.log_in(self.user_client["email"])
+
+    def log_in_vendor(self):
+        self.log_in(self.user_vendor["email"])
+
+    def log_out(self):
+        try:
+            self.get("auth/logout")
+        except AssertionError:
+            pass
+
+    def get(self, path, code=200):
+        """
+        Get data provided at given path. Format depends on the path.
+        """
+        response = self.app.get(path, headers=self.base_headers)
+        self.assertEqual(response.status_code, code)
+        return json.loads(response.data.decode("utf-8"))
+
+    def get_raw(self, path, code=200):
+        """
+        Get data provided at given path. Format depends on the path. Do not
+        parse the json.
+        """
+        response = self.app.get(path, headers=self.base_headers)
+        self.assertEqual(response.status_code, code)
+        return response.data.decode("utf-8")
+
+    def get_first(self, path, code=200):
+        """
+        Get first element of data at given path. It makes the assumption that
+        returned data is an array.
+        """
+        rows = self.get(path, code)
+        return rows[0]
+
+    def get_404(self, path):
+        """
+        Make sure that given path returns a 404 error for GET requests.
+        """
+        response = self.app.get(path, headers=self.base_headers)
+        self.assertEqual(response.status_code, 404)
+
+    def post(self, path, data, code=201):
+        """
+        Run a post request at given path while making sure it sends data at
+        JSON format.
+        """
+        clean_data = fields.serialize_value(data)
+        response = self.app.post(
+            path, data=json.dumps(clean_data), headers=self.post_headers
+        )
+        if response.status_code == 500:
+            print(response.data)
+        self.assertEqual(response.status_code, code)
+        return json.loads(response.data.decode("utf-8"))
+
+    def post_404(self, path, data):
+        """
+        Make sure that given path returns a 404 error for POST requests.
+        """
+        response = self.app.post(
+            path, data=json.dumps(data), headers=self.post_headers
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def put(self, path, data, code=200):
+        """
+        Run a put request at given path while making sure it sends data at JSON
+        format.
+        """
+        response = self.app.put(
+            path, data=json.dumps(data), headers=self.post_headers
+        )
+        self.assertEqual(response.status_code, code)
+        return json.loads(response.data.decode("utf-8"))
+
+    def put_404(self, path, data):
+        """
+        Make sure that given path returns a 404 error for PUT requests.
+        """
+        response = self.app.put(
+            path, data=json.dumps(data), headers=self.post_headers
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def delete(self, path, code=204):
+        """
+        Run a delete request at given path.
+        """
+        response = self.app.delete(path, headers=self.base_headers)
+        self.assertEqual(response.status_code, code)
+        return response.data
+
+    def delete_404(self, path):
+        """
+        Make sure that given path returns a 404 error for DELETE requests.
+        """
+        response = self.app.delete(path, headers=self.base_headers)
+        self.assertEqual(response.status_code, 404)
+
+    def upload_file(self, path, file_path, code=201, extra_fields={}):
+        """
+        Upload a file at given path. File data are sent in the request body.
+        """
+        file_content = open(file_path, "rb")
+        file_name = ntpath.basename(file_path)
+        data = {"file": (file_content, file_name)}
+        if len(extra_fields.keys()) > 0:
+            data.update(extra_fields)
+        response = self.app.post(path, data=data, headers=self.base_headers)
+        self.assertEqual(response.status_code, code)
+        return response.json
+
+    def download_file(self, path, target_file_path, code=200):
+        """
+        Download a file located at given url path and save it at given file
+        path.
+        """
+        response = self.app.get(path, headers=self.base_headers)
+        self.assertEqual(response.status_code, code)
+        file_descriptor = open(target_file_path, "wb")
+        file_descriptor.write(response.data)
+        return open(target_file_path, "rb").read()
+
+
+class ApiDBTestCase(ApiTestCase):
+    """
+    Set of helpers for Api tests.
+    """
+
+    # Schema is created once per session in conftest.py.
+    # Data is truncated between classes (much faster than drop+create).
+
+    @classmethod
+    def setUpClass(cls):
+        super(ApiDBTestCase, cls).setUpClass()
+        with app.app_context():
+            table_names = ", ".join(
+                f'"{t.name}"' for t in db.metadata.tables.values()
+            )
+            if table_names:
+                with db.engine.connect() as conn:
+                    conn.execute(db.text(f"TRUNCATE {table_names} CASCADE"))
+                    conn.commit()
+
+    def setUp(self, expire_on_commit=True):
+        """
+        Configure application before each test.
+        set up database transaction.
+        """
+        super(ApiDBTestCase, self).setUp()
+
+        self._db_connection = db.engine.connect()
+        self._db_transaction = self._db_connection.begin()
+        factory = sessionmaker(
+            bind=self._db_connection,
+            binds={},
+            expire_on_commit=expire_on_commit,
+        )
+        self._db_session = scoped_session(
+            factory, current_app._get_current_object
+        )
+        db.session = self._db_session
+
+        self.generate_fixture_user()
+        self.log_in_admin()
+
+    def tearDown(self):
+        """
+        Configure application after each test.
+        Rollback transaction to return database to its original state.
+        """
+        super(ApiDBTestCase, self).tearDown()
+        if not self._db_transaction._deactivated_from_connection:
+            self._db_transaction.rollback()
+        self._db_connection.close()
+        self._db_session.remove()
+
+    def generate_data(self, cls, number, **kwargs):
+        """
+        Generate random data for a given data model.
+        """
+        mixer.init_app(self.flask_app)
+        return mixer.cycle(number).blend(cls, id=fields.gen_uuid, **kwargs)
+
+    def generate_fixture_project_status(self):
+        if hasattr(self, "open_status"):
+            return
+        self.open_status = ProjectStatus.create(name="Open", color="#FFFFFF")
+
+    def generate_fixture_project_closed_status(self):
+        if hasattr(self, "closed_status"):
+            return
+        self.closed_status = ProjectStatus.create(
+            name="closed", color="#FFFFFF"
+        )
+
+    def generate_fixture_project(self, name="Cosmos Landromat"):
+        if (
+            name == "Cosmos Landromat"
+            and hasattr(self, "project")
+            and self.project.name == name
+        ):
+            return self.project
+        self.generate_fixture_project_status()
+        self.project = Project.create(
+            name=name, project_status_id=self.open_status.id
+        )
+        self.project_id = self.project.id
+        self.project.update(
+            {"file_tree": file_tree_service.get_tree_from_file("simple")}
+        )
+        return self.project
+
+    def generate_fixture_project_closed(self):
+        if hasattr(self, "project_closed"):
+            return
+        self.generate_fixture_project_closed_status()
+        self.project_closed = Project.create(
+            name="Old Project", project_status_id=self.closed_status.id
+        )
+
+    def generate_fixture_project_standard(self):
+        if hasattr(self, "project_standard"):
+            return
+        self.generate_fixture_project_status()
+        self.project_standard = Project.create(
+            name="Big Buck Bunny", project_status_id=self.open_status.id
+        )
+        self.project_standard.update(
+            {"file_tree": file_tree_service.get_tree_from_file("default")}
+        )
+
+    def generate_fixture_project_no_preview_tree(self):
+        if hasattr(self, "project_no_preview_tree"):
+            return
+        self.generate_fixture_project_status()
+        self.project_no_preview_tree = Project.create(
+            name="Agent 327", project_status_id=self.open_status.id
+        )
+        self.project_no_preview_tree.update(
+            {"file_tree": file_tree_service.get_tree_from_file("no_preview")}
+        )
+
+    def generate_fixture_asset(
+        self,
+        name="Tree",
+        description="Description Tree",
+        asset_type_id=None,
+        project_id=None,
+    ):
+        if (
+            name == "Tree"
+            and description == "Description Tree"
+            and asset_type_id is None
+            and project_id is None
+            and hasattr(self, "asset")
+        ):
+            return self.asset
+        self.generate_fixture_asset_type()
+        if not hasattr(self, "project"):
+            self.generate_fixture_project()
+        if asset_type_id is None:
+            asset_type_id = self.asset_type.id
+
+        if project_id is None:
+            project_id = self.project_id
+
+        self.asset = Entity.create(
+            name=name,
+            description=description,
+            project_id=project_id,
+            entity_type_id=asset_type_id,
+        )
+        return self.asset
+
+    def generate_fixture_asset_character(
+        self, name="Rabbit", description="Main char"
+    ):
+        if (
+            name == "Rabbit"
+            and description == "Main char"
+            and hasattr(self, "asset_character")
+        ):
+            return self.asset_character
+        self.generate_fixture_asset_types()
+        self.generate_fixture_project()
+        self.asset_character = Entity.create(
+            name=name,
+            description=description,
+            project_id=self.project.id,
+            entity_type_id=self.asset_type_character.id,
+        )
+        return self.asset_character
+
+    def generate_fixture_asset_camera(self):
+        if hasattr(self, "asset_camera"):
+            return
+        self.generate_fixture_asset_types()
+        self.generate_fixture_project()
+        self.asset_camera = Entity.create(
+            name="Main camera",
+            description="Description Camera",
+            project_id=self.project.id,
+            entity_type_id=self.asset_type_camera.id,
+        )
+
+    def generate_fixture_asset_standard(self):
+        if hasattr(self, "asset_standard"):
+            return
+        self.generate_fixture_asset_type()
+        self.generate_fixture_project_standard()
+        self.asset_standard = Entity.create(
+            name="Car",
+            project_id=self.project_standard.id,
+            entity_type_id=self.asset_type.id,
+        )
+
+    def generate_fixture_sequence(
+        self, name="S01", episode_id=None, project_id=None
+    ):
+        if (
+            name == "S01"
+            and episode_id is None
+            and project_id is None
+            and hasattr(self, "sequence")
+        ):
+            return self.sequence
+        self.generate_fixture_asset_type()
+        self.generate_fixture_project()
+        if episode_id is None and hasattr(self, "episode"):
+            episode_id = self.episode.id
+
+        if project_id is None:
+            project_id = self.project.id
+
+        self.sequence = Entity.create(
+            name=name,
+            project_id=project_id,
+            entity_type_id=self.sequence_type.id,
+            parent_id=episode_id,
+        )
+        return self.sequence
+
+    def generate_fixture_sequence_standard(self):
+        if hasattr(self, "sequence_standard"):
+            return self.sequence_standard
+        self.generate_fixture_asset_type()
+        self.generate_fixture_project_standard()
+        self.sequence_standard = Entity.create(
+            name="S01",
+            project_id=self.project_standard.id,
+            entity_type_id=self.sequence_type.id,
+        )
+        return self.sequence_standard
+
+    def generate_fixture_episode(self, name="E01", project_id=None):
+        self.generate_fixture_asset_type()
+        self.generate_fixture_project()
+        if project_id is None:
+            project_id = self.project.id
+        self.episode = Entity.create(
+            name=name,
+            project_id=project_id,
+            entity_type_id=self.episode_type.id,
+        )
+        return self.episode
+
+    def generate_fixture_shot(self, name="P01", nb_frames=0, sequence_id=None):
+        if (
+            name == "P01"
+            and nb_frames == 0
+            and sequence_id is None
+            and hasattr(self, "shot")
+            and self.shot.parent_id == self.sequence.id
+        ):
+            return self.shot
+        self.generate_fixture_asset_type()
+        self.generate_fixture_project()
+        self.generate_fixture_sequence()
+        if sequence_id is None:
+            sequence_id = self.sequence.id
+        self.shot = Entity.create(
+            name=name,
+            description="Description Shot 01",
+            data={"fps": 25, "frame_in": 0, "frame_out": 100},
+            project_id=self.project.id,
+            entity_type_id=self.shot_type.id,
+            parent_id=sequence_id,
+            nb_frames=nb_frames,
+        )
+        return self.shot
+
+    def generate_fixture_scene(
+        self, name="SC01", project_id=None, sequence_id=None
+    ):
+        if (
+            name == "SC01"
+            and project_id is None
+            and sequence_id is None
+            and hasattr(self, "scene")
+        ):
+            return self.scene
+        self.generate_fixture_asset_type()
+        self.generate_fixture_project()
+        self.generate_fixture_sequence()
+        if project_id is None:
+            project_id = self.project.id
+
+        if sequence_id is None:
+            sequence_id = self.sequence.id
+
+        self.scene = Entity.create(
+            name=name,
+            description="Description Scene 01",
+            data={},
+            project_id=project_id,
+            entity_type_id=self.scene_type.id,
+            parent_id=self.sequence.id,
+        )
+        return self.scene
+
+    def generate_fixture_shot_standard(self, name="SH01"):
+        if name == "SH01" and hasattr(self, "shot_standard"):
+            return self.shot_standard
+        self.generate_fixture_asset_type()
+        self.generate_fixture_project_standard()
+        self.generate_fixture_sequence_standard()
+        self.shot_standard = Entity.create(
+            name=name,
+            description="Description Shot 01",
+            data={"fps": 25, "frame_in": 0, "frame_out": 100},
+            project_id=self.project_standard.id,
+            entity_type_id=self.shot_type.id,
+            parent_id=self.sequence_standard.id,
+        )
+        return self.shot_standard
+
+    def generate_fixture_shot_asset_instance(
+        self, shot, asset_instance, number=1
+    ):
+        self.shot.instance_casting.append(asset_instance)
+        self.shot.save()
+        return self.shot
+
+    def generate_fixture_scene_asset_instance(
+        self, asset=None, scene=None, number=1
+    ):
+        if asset is None:
+            asset = self.asset
+        if scene is None:
+            scene = self.scene
+        self.asset_instance = AssetInstance.create(
+            asset_id=asset.id,
+            scene_id=scene.id,
+            number=number,
+            name=breakdown_service.build_asset_instance_name(
+                self.asset.id, number
+            ),
+            description="Asset instance description",
+        )
+        return self.asset_instance
+
+    def generate_fixture_asset_asset_instance(
+        self, asset=None, target_asset=None, number=1
+    ):
+        if asset is None:
+            asset = self.asset_character
+        if target_asset is None:
+            target_asset = self.asset
+        self.asset_instance = AssetInstance.create(
+            asset_id=asset.id,
+            target_asset_id=target_asset.id,
+            number=number,
+            name=breakdown_service.build_asset_instance_name(asset.id, number),
+            description="Asset instance description",
+        )
+        return self.asset_instance
+
+    def generate_fixture_user(self):
+        self.user = Person.create(
+            first_name="John",
+            last_name="Did",
+            role="admin",
+            email="john.did@gmail.com",
+            password=_CACHED_PASSWORD_HASH,
+        ).serialize()
+        return self.user
+
+    def generate_fixture_user_manager(self):
+        if hasattr(self, "user_manager"):
+            return self.user_manager
+        self.user_manager = Person.create(
+            first_name="John",
+            last_name="Did2",
+            role="manager",
+            email="john.did.manager@gmail.com",
+            password=_CACHED_PASSWORD_HASH,
+        ).serialize()
+        return self.user_manager
+
+    def generate_fixture_user_cg_artist(self):
+        if hasattr(self, "user_cg_artist"):
+            return self.user_cg_artist
+        self.user_cg_artist = Person.create(
+            first_name="John",
+            last_name="Did3",
+            email="john.did.cg.artist@gmail.com",
+            role="user",
+            password=_CACHED_PASSWORD_HASH,
+        ).serialize(relations=True)
+        return self.user_cg_artist
+
+    def generate_fixture_user_client(self):
+        if hasattr(self, "user_client"):
+            return self.user_client
+        self.user_client = Person.create(
+            first_name="John",
+            last_name="Did4",
+            role="client",
+            email="john.did.client@gmail.com",
+            password=_CACHED_PASSWORD_HASH,
+        ).serialize()
+        return self.user_client
+
+    def generate_fixture_user_vendor(self):
+        if hasattr(self, "user_vendor"):
+            return self.user_vendor
+        self.user_vendor = Person.create(
+            first_name="John",
+            last_name="Did5",
+            role="vendor",
+            email="john.did.vendor@gmail.com",
+            password=_CACHED_PASSWORD_HASH,
+        ).serialize()
+        return self.user_vendor
+
+    def generate_fixture_person(
+        self,
+        first_name="John",
+        last_name="Doe",
+        desktop_login="john.doe",
+        email="john.doe@gmail.com",
+    ):
+        self.person = Person.get_by(email=email)
+        if self.person is None:
+            self.person = Person.create(
+                first_name=first_name,
+                last_name=last_name,
+                desktop_login=desktop_login,
+                email=email,
+                password=_CACHED_PASSWORD_HASH,
+            )
+        return self.person
+
+    def generate_fixture_asset_type(self):
+        if hasattr(self, "asset_type"):
+            return
+        self.asset_type = EntityType.create(name="Props")
+        self.asset_type_props = self.asset_type
+        self.shot_type = EntityType.create(name="Shot")
+        self.sequence_type = EntityType.create(name="Sequence")
+        self.episode_type = EntityType.create(name="Episode")
+        self.scene_type = EntityType.create(name="Scene")
+        self.edit_type = EntityType.create(name="Edit")
+
+    def generate_fixture_asset_types(self):
+        if hasattr(self, "asset_type_character"):
+            return
+        self.asset_type_character = EntityType.create(name="Character")
+        self.asset_type_environment = EntityType.create(name="Environment")
+        self.asset_type_camera = EntityType.create(name="Camera")
+
+    def generate_fixture_department(self):
+        if hasattr(self, "department"):
+            return self.department
+        self.department = Department.create(name="Modeling", color="#FFFFFF")
+        self.department_animation = Department.create(
+            name="Animation", color="#FFFFFF"
+        )
+        return self.department
+
+    def generate_fixture_task_type(self):
+        if hasattr(self, "task_type"):
+            return
+        self.generate_fixture_department()
+        self.task_type = TaskType.create(
+            name="Shaders",
+            short_name="shd",
+            color="#FFFFFF",
+            for_entity="Asset",
+            department_id=self.department.id,
+        )
+        self.task_type_concept = TaskType.create(
+            name="Concept",
+            short_name="cpt",
+            color="#FFFFFF",
+            for_entity="Asset",
+            department_id=self.department.id,
+        )
+        self.task_type_modeling = TaskType.create(
+            name="Modeling",
+            short_name="mdl",
+            color="#FFFFFF",
+            for_entity="Asset",
+            department_id=self.department.id,
+        )
+        self.task_type_animation = TaskType.create(
+            name="Animation",
+            short_name="anim",
+            color="#FFFFFF",
+            for_entity="Shot",
+            department_id=self.department_animation.id,
+        )
+        self.task_type_layout = TaskType.create(
+            name="Layout",
+            short_name="layout",
+            color="#FFFFFF",
+            for_entity="Shot",
+            department_id=self.department_animation.id,
+        )
+        self.task_type_edit = TaskType.create(
+            name="Edit",
+            short_name="edit",
+            color="#FFFFFF",
+            for_entity="Edit",
+        )
+
+    def generate_fixture_task_status(self):
+        if hasattr(self, "task_status"):
+            return self.task_status
+        self.task_status = TaskStatus.create(
+            name="Open", short_name="opn", color="#FFFFFF"
+        )
+        return self.task_status
+
+    def generate_fixture_task_status_wip(self):
+        if hasattr(self, "task_status_wip"):
+            return self.task_status_wip
+        self.task_status_wip = TaskStatus.create(
+            name="WIP", short_name="wip", color="#FFFFFF", is_wip=True
+        )
+        return self.task_status_wip
+
+    def generate_fixture_task_status_to_review(self):
+        if hasattr(self, "task_status_to_review"):
+            return self.task_status_to_review
+        self.task_status_to_review = TaskStatus.create(
+            name="To review", short_name="pndng", color="#FFFFFF"
+        )
+        return self.task_status_to_review
+
+    def generate_fixture_task_status_retake(self):
+        if hasattr(self, "task_status_retake"):
+            return self.task_status_retake
+        self.task_status_retake = TaskStatus.create(
+            name="Retake", short_name="rtk", color="#FFFFFF", is_retake=True
+        )
+        return self.task_status_retake
+
+    def generate_fixture_task_status_done(self):
+        if hasattr(self, "task_status_done"):
+            return self.task_status_done
+        self.task_status_done = TaskStatus.create(
+            name="Done", short_name="done", color="#FFFFFF", is_done=True
+        )
+        return self.task_status_done
+
+    def generate_fixture_task_status_wfa(self):
+        if hasattr(self, "task_status_wfa"):
+            return self.task_status_wfa.serialize()
+        self.task_status_wfa = TaskStatus.create(
+            name="Waiting For Approval",
+            short_name="wfa",
+            color="#FFFFFF",
+            is_feedback_request=True,
+        )
+        return self.task_status_wfa.serialize()
+
+    def generate_fixture_task_status_todo(self):
+        if hasattr(self, "task_status_todo"):
+            return self.task_status_todo
+        self.task_status_todo = tasks_service.get_default_status()
+        return self.task_status_todo
+
+    def generate_fixture_status_automation_to_status(self):
+        if hasattr(self, "status_automation_to_status"):
+            return self.status_automation_to_status
+        self.generate_fixture_task_type()
+        self.generate_fixture_task_status_done()
+        self.generate_fixture_task_status_wip()
+        self.generate_fixture_project()
+        self.status_automation_to_status = StatusAutomation.create(
+            entity_type="asset",
+            in_task_type_id=self.task_type_concept.id,
+            in_task_status_id=self.task_status_done.id,
+            out_field_type="status",
+            out_task_type_id=self.task_type_modeling.id,
+            out_task_status_id=self.task_status_wip.id,
+        )
+        projects_service.add_status_automation_setting(
+            self.project_id, self.status_automation_to_status.id
+        )
+        return self.status_automation_to_status
+
+    def generate_fixture_status_automation_to_ready_for(self):
+        if hasattr(self, "status_automation_to_ready_for"):
+            return self.status_automation_to_ready_for
+        self.generate_fixture_task_type()
+        self.generate_fixture_task_status_done()
+        self.generate_fixture_project()
+        self.status_automation_to_ready_for = StatusAutomation.create(
+            entity_type="asset",
+            in_task_type_id=self.task_type_modeling.id,
+            in_task_status_id=self.task_status_done.id,
+            out_field_type="ready_for",
+            out_task_type_id=self.task_type_layout.id,
+            out_task_status_id=None,
+        )
+        projects_service.add_status_automation_setting(
+            self.project_id, self.status_automation_to_ready_for.id
+        )
+        return self.status_automation_to_ready_for
+
+    def generate_fixture_assigner(self):
+        if hasattr(self, "assigner"):
+            return self.assigner
+        self.assigner = Person.create(first_name="Ema", last_name="Peel")
+        return self.assigner
+
+    def generate_fixture_task(
+        self, name="Master", entity_id=None, task_type_id=None, project_id=None
+    ):
+        if (
+            name == "Master"
+            and entity_id is None
+            and task_type_id is None
+            and project_id is None
+            and hasattr(self, "task")
+            and hasattr(self, "asset")
+            and self.task.project_id == self.project.id
+            and self.task.entity_id == self.asset.id
+        ):
+            return self.task
+        self.generate_fixture_asset()
+        self.generate_fixture_task_type()
+        self.generate_fixture_task_status()
+        self.generate_fixture_person()
+        self.generate_fixture_assigner()
+        if entity_id is None:
+            entity_id = self.asset.id
+
+        if task_type_id is None:
+            task_type_id = self.task_type.id
+
+        if project_id is None:
+            project_id = self.project.id
+
+        start_date = fields.get_date_object("2017-02-20")
+        due_date = fields.get_date_object("2017-02-28")
+        real_start_date = fields.get_date_object("2017-02-22")
+        self.task = Task.create(
+            name=name,
+            project_id=project_id,
+            task_type_id=task_type_id,
+            task_status_id=self.task_status.id,
+            entity_id=entity_id,
+            assignees=[self.person],
+            assigner_id=self.assigner.id,
+            duration=50,
+            estimation=40,
+            start_date=start_date,
+            due_date=due_date,
+            real_start_date=real_start_date,
+        )
+        self.task_id = self.task.id
+        self.project.team.append(self.person)
+        self.project.save()
+        return self.task
+
+    def generate_fixture_task_standard(self):
+        if hasattr(self, "task_standard"):
+            return self.task_standard
+        self.generate_fixture_asset_standard()
+        self.generate_fixture_task_type()
+        self.generate_fixture_task_status()
+        self.generate_fixture_person()
+        self.generate_fixture_assigner()
+        start_date = fields.get_date_object("2017-02-20")
+        due_date = fields.get_date_object("2017-02-28")
+        real_start_date = fields.get_date_object("2017-02-22")
+        self.task_standard = Task.create(
+            name="Super modeling",
+            project_id=self.project_standard.id,
+            task_type_id=self.task_type.id,
+            task_status_id=self.task_status.id,
+            entity_id=self.asset_standard.id,
+            assignees=[self.person],
+            assigner_id=self.assigner.id,
+            duration=50,
+            estimation=40,
+            start_date=start_date,
+            due_date=due_date,
+            real_start_date=real_start_date,
+        )
+        self.project.team.append(self.person)
+        self.project.save()
+        return self.task_standard
+
+    def generate_fixture_shot_task(
+        self, name="Master", shot_id=None, task_type_id=None
+    ):
+        if (
+            name == "Master"
+            and shot_id is None
+            and task_type_id is None
+            and hasattr(self, "shot_task")
+            and hasattr(self, "shot")
+            and self.shot_task.entity_id == self.shot.id
+        ):
+            return self.shot_task
+        if not hasattr(self, "shot"):
+            self.generate_fixture_shot()
+        self.generate_fixture_task_type()
+        self.generate_fixture_task_status()
+        self.generate_fixture_person()
+        self.generate_fixture_assigner()
+        if task_type_id is None:
+            task_type_id = self.task_type_animation.id
+
+        if shot_id is None:
+            shot_id = self.shot.id
+
+        self.shot_task = Task.create(
+            name=name,
+            project_id=self.project.id,
+            task_type_id=task_type_id,
+            task_status_id=self.task_status.id,
+            entity_id=shot_id,
+            assignees=[self.person],
+            assigner_id=self.assigner.id,
+        )
+        self.project.team.append(self.person)
+        self.project.save()
+        return self.shot_task
+
+    def generate_fixture_edit_task(self, name="Edit", task_type_id=None):
+        if (
+            name == "Edit"
+            and task_type_id is None
+            and hasattr(self, "edit_task")
+        ):
+            return self.edit_task
+        if not hasattr(self, "edit"):
+            self.generate_fixture_edit()
+        self.generate_fixture_task_type()
+        self.generate_fixture_task_status()
+        self.generate_fixture_person()
+        self.generate_fixture_assigner()
+        if task_type_id is None:
+            task_type_id = self.task_type_edit.id
+
+        self.edit_task = Task.create(
+            name=name,
+            project_id=self.project.id,
+            task_type_id=task_type_id,
+            task_status_id=self.task_status.id,
+            entity_id=self.edit.id,
+            assignees=[self.person],
+            assigner_id=self.assigner.id,
+        )
+        self.project.team.append(self.person)
+        self.project.save()
+        return self.edit_task
+
+    def generate_fixture_episode_task(self, name="Master"):
+        if name == "Master" and hasattr(self, "episode_task"):
+            return self.episode_task
+        if not hasattr(self, "episode"):
+            self.generate_fixture_episode()
+        self.generate_fixture_task_type()
+        self.generate_fixture_task_status()
+        self.generate_fixture_person()
+        self.generate_fixture_assigner()
+        self.episode_task = Task.create(
+            name=name,
+            project_id=self.project.id,
+            task_type_id=self.task_type_animation.id,
+            task_status_id=self.task_status.id,
+            entity_id=self.episode.id,
+            assignees=[self.person],
+            assigner_id=self.assigner.id,
+        )
+        self.project.team.append(self.person)
+        self.project.save()
+        return self.episode_task
+
+    def generate_fixture_scene_task(self, name="Master"):
+        if name == "Master" and hasattr(self, "scene_task"):
+            return self.scene_task
+        self.generate_fixture_scene()
+        self.generate_fixture_task_type()
+        self.generate_fixture_task_status()
+        self.generate_fixture_person()
+        self.generate_fixture_assigner()
+        self.scene_task = Task.create(
+            name=name,
+            project_id=self.project.id,
+            task_type_id=self.task_type_animation.id,
+            task_status_id=self.task_status.id,
+            entity_id=self.scene.id,
+            assignees=[self.person],
+            assigner_id=self.assigner.id,
+        )
+        self.project.team.append(self.person)
+        self.project.save()
+        return self.scene_task
+
+    def generate_fixture_sequence_task(self, name="Master"):
+        if name == "Master" and hasattr(self, "sequence_task"):
+            return self.sequence_task
+        self.generate_fixture_sequence()
+        self.generate_fixture_task_type()
+        self.generate_fixture_task_status()
+        self.generate_fixture_person()
+        self.generate_fixture_assigner()
+        self.sequence_task = Task.create(
+            name=name,
+            project_id=self.project.id,
+            task_type_id=self.task_type_animation.id,
+            task_status_id=self.task_status.id,
+            entity_id=self.sequence.id,
+            assignees=[self.person],
+            assigner_id=self.assigner.id,
+        )
+        self.project.team.append(self.person)
+        self.project.save()
+        return self.sequence_task
+
+    def generate_fixture_shot_task_standard(self):
+        if hasattr(self, "shot_task_standard"):
+            return self.shot_task_standard
+        self.generate_fixture_shot_standard()
+        self.generate_fixture_task_type()
+        self.generate_fixture_task_status()
+        self.generate_fixture_person()
+        self.generate_fixture_assigner()
+        self.shot_task_standard = Task.create(
+            name="Super animation",
+            project_id=self.project_standard.id,
+            task_type_id=self.task_type_animation.id,
+            task_status_id=self.task_status.id,
+            entity_id=self.shot_standard.id,
+            assignees=[self.person],
+            assigner_id=self.assigner.id,
+        )
+        self.project.team.append(self.person)
+        self.project.save()
+        return self.shot_task_standard
+
+    def generate_fixture_comment(
+        self, person=None, task_id=None, task_status_id=None
+    ):
+        self.generate_fixture_person()
+        if not hasattr(self, "task"):
+            self.generate_fixture_task()
+        self.generate_fixture_task_status()
+        if person is None:
+            person = self.person.serialize()
+        if task_id is None:
+            task_id = self.task.id
+        if task_status_id is None:
+            task_status_id = self.task_status.id
+        self.comment = comments_service.new_comment(
+            task_id, task_status_id, person["id"], "first comment"
+        )
+        return self.comment
+
+    def generate_fixture_file_status(self):
+        if hasattr(self, "file_status"):
+            return
+        self.file_status = FileStatus.create(name="To review", color="#FFFFFF")
+
+    def generate_fixture_working_file(self, name="main", revision=1):
+        if not hasattr(self, "task"):
+            self.generate_fixture_task()
+        self.generate_fixture_software()
+        self.working_file = WorkingFile.create(
+            name=name,
+            comment="",
+            revision=revision,
+            task_id=self.task.id,
+            entity_id=self.asset.id,
+            person_id=self.person.id,
+            software_id=self.software.id,
+        )
+        return self.working_file
+
+    def generate_fixture_shot_working_file(self):
+        self.generate_fixture_shot_task()
+        self.generate_fixture_software()
+        self.working_file = WorkingFile.create(
+            name="main",
+            comment="",
+            revision=1,
+            task_id=self.shot_task.id,
+            entity_id=self.shot.id,
+            person_id=self.person.id,
+            software_id=self.software.id,
+        )
+
+    def generate_fixture_output_file(
+        self,
+        output_type=None,
+        revision=1,
+        name="main",
+        representation="",
+        asset_instance=None,
+        temporal_entity_id=None,
+        task=None,
+    ):
+        self.generate_fixture_task_type()
+        self.generate_fixture_person()
+        self.generate_fixture_file_status()
+        if output_type is None:
+            output_type = self.output_type
+
+        if task is None:
+            task_type_id = self.task_type.id
+            asset_id = self.asset.id
+        else:
+            task_type_id = task.task_type_id
+            asset_id = task.entity_id
+
+        if asset_instance is None:
+            asset_instance_id = None
+        else:
+            asset_instance_id = asset_instance.id
+            if temporal_entity_id is None:
+                temporal_entity_id = self.scene.id
+
+        self.output_file = OutputFile.create(
+            comment="",
+            revision=revision,
+            task_type_id=task_type_id,
+            entity_id=asset_id,
+            person_id=self.person.id,
+            file_status_id=self.file_status.id,
+            output_type_id=output_type.id,
+            asset_instance_id=asset_instance_id,
+            representation=representation,
+            temporal_entity_id=temporal_entity_id,
+            name=name,
+        )
+        return self.output_file
+
+    def generate_fixture_output_type(self, name="Geometry", short_name="Geo"):
+        self.output_type = OutputType.create(name=name, short_name=short_name)
+        return self.output_type
+
+    def generate_fixture_software(self):
+        if hasattr(self, "software"):
+            return
+        self.software = Software.create(
+            name="Blender", short_name="bdr", file_extension=".blender"
+        )
+        self.software_max = Software.create(
+            name="3dsMax", short_name="max", file_extension=".max"
+        )
+
+    def generate_fixture_organisation(self):
+        if hasattr(self, "organisation"):
+            return
+        self.organisation = Organisation.create(
+            name="My Studio", hours_by_day=8, use_original_file_name=False
+        )
+
+    def generate_fixture_preview_file(
+        self,
+        revision=1,
+        name="main",
+        position=1,
+        status="ready",
+        duration=10,
+        task_id=None,
+    ):
+        if not hasattr(self, "task"):
+            self.generate_fixture_task()
+        self.generate_fixture_person()
+        task_id = task_id or self.task.id
+        self.preview_file = PreviewFile.create(
+            name=name,
+            revision=revision,
+            description="test description",
+            source="pytest",
+            task_id=task_id,
+            extension="mp4",
+            person_id=self.person.id,
+            position=position,
+            status=status,
+            duration=duration,
+        )
+        return self.preview_file
+
+    def generate_fixture_preview_background_file(
+        self,
+        name="test",
+    ):
+        self.preview_background_file = PreviewBackgroundFile.create(name=name)
+        return self.preview_background_file
+
+    def get_fixture_file_path(self, relative_path):
+        current_path = os.getcwd()
+        file_path_fixture = os.path.join(
+            current_path, "tests", "fixtures", relative_path
+        )
+        return file_path_fixture
+
+    def generate_fixture_metadata_descriptor(self, entity_type="Asset"):
+        self.meta_descriptor = MetadataDescriptor.create(
+            project_id=self.project.id,
+            name="Contractor",
+            data_type="list",
+            field_name="contractor",
+            choices=["value 1", "value 2"],
+            entity_type=entity_type,
+        )
+        return self.meta_descriptor
+
+    def generate_fixture_playlist(
+        self,
+        name,
+        project_id=None,
+        episode_id=None,
+        for_entity="shot",
+        for_client=False,
+        is_for_all=False,
+        task_type_id=None,
+    ):
+        if project_id is None:
+            project_id = self.project.id
+        self.playlist = Playlist.create(
+            name=name,
+            project_id=project_id,
+            episode_id=episode_id,
+            for_entity=for_entity,
+            is_for_all=is_for_all,
+            for_client=for_client,
+            task_type_id=task_type_id,
+            shots=[],
+        )
+        return self.playlist.serialize()
+
+    def generate_fixture_build_job(self, ended_at, playlist_id=None):
+        if playlist_id is None:
+            playlist_id = self.playlist.id
+        self.build_job = BuildJob.create(
+            status="succeeded",
+            job_type="movie",
+            ended_at=ended_at,
+            playlist_id=playlist_id,
+        )
+        return self.build_job.serialize()
+
+    def generate_fixture_subscription(self, task_id=None):
+        task = self.task
+        if task_id is not None:
+            task = Task.get(task_id)
+
+        self.subscription = Subscription.create(
+            person_id=self.user["id"],
+            task_id=task.id,
+            entity_id=task.entity_id,
+            task_type_id=task.task_type_id,
+        )
+        return self.subscription.serialize()
+
+    def generate_fixture_notification(self):
+        self.notification = Notification.create(
+            type="comment",
+            person_id=self.user["id"],
+            author_id=self.person.id,
+            comment_id=self.comment["id"],
+            task_id=self.task.id,
+        )
+        return self.notification.serialize()
+
+    def generate_fixture_milestone(self):
+        self.milestone = Milestone.create(
+            name="Test Milestone",
+            project_id=self.project.id,
+            task_type_id=self.task_type.id,
+        )
+        return self.milestone.serialize()
+
+    def generate_fixture_schedule_item(
+        self, task_type_id=None, object_id=None
+    ):
+        if task_type_id is None:
+            task_type_id = self.task_type.id
+        self.schedule_item = ScheduleItem.create(
+            project_id=self.project.id,
+            task_type_id=self.task_type.id,
+            object_id=object_id,
+        )
+        return self.schedule_item.serialize()
+
+    def generate_fixture_day_off(self, date, end_date=None, person_id=None):
+        if person_id is None:
+            person_id = self.person.id
+        self.day_off = DayOff.create(
+            date=date, end_date=end_date or date, person_id=person_id
+        )
+        return self.day_off.serialize()
+
+    def generate_fixture_edit(self, name="Edit", parent_id=None):
+        self.generate_fixture_asset_type()
+        self.generate_fixture_project()
+        self.edit = Entity.create(
+            name=name,
+            description="Description of the Edit",
+            project_id=self.project.id,
+            entity_type_id=self.edit_type.id,
+            parent_id=parent_id,
+        )
+        return self.edit
+
+    def generate_base_context(self):
+        self.generate_fixture_project_status()
+        self.generate_fixture_project()
+        self.generate_fixture_asset_type()
+        self.generate_fixture_department()
+        self.generate_fixture_task_type()
+        self.generate_fixture_task_status()
+
+    def generate_assigned_task(self):
+        self.generate_fixture_asset()
+        self.generate_fixture_department()
+        self.generate_fixture_task_type()
+        self.generate_fixture_task_status()
+        self.generate_fixture_person()
+        self.generate_fixture_assigner()
+        self.generate_fixture_task()
+
+    def generate_shot_suite(self):
+        self.generate_fixture_asset_type()
+        self.generate_fixture_project_status()
+        self.generate_fixture_project()
+        self.generate_fixture_episode()
+        self.generate_fixture_sequence()
+        self.generate_fixture_shot()
+        self.generate_fixture_scene()
+
+    def generate_fixture_shot_tasks_and_previews(self, task_type_id):
+        episode_01 = self.episode
+        sequence_01 = self.sequence
+        shot_01 = self.shot
+        shot_02 = self.generate_fixture_shot("SH02")
+        shot_03 = self.generate_fixture_shot("SH03")
+
+        self.generate_fixture_episode("E02")
+        episode_02 = self.episode
+        self.generate_fixture_sequence("S02", episode_id=episode_02.id)
+        sequence_02 = self.sequence
+        shot_e201 = self.generate_fixture_shot(
+            "E2SH01", sequence_id=sequence_02.id
+        )
+
+        task_shot_01 = self.generate_fixture_shot_task(
+            shot_id=shot_01.id, task_type_id=task_type_id
+        )
+        task_shot_02 = self.generate_fixture_shot_task(
+            shot_id=shot_02.id, task_type_id=task_type_id
+        )
+        task_shot_03 = self.generate_fixture_shot_task(
+            shot_id=shot_03.id, task_type_id=task_type_id
+        )
+        task_shot_e201 = self.generate_fixture_shot_task(
+            shot_id=shot_e201.id, task_type_id=task_type_id
+        )
+        preview_01 = self.generate_fixture_preview_file(
+            task_id=task_shot_01.id, revision=1, duration=15
+        )
+        preview_01 = self.generate_fixture_preview_file(
+            task_id=task_shot_01.id, revision=2, duration=25
+        )
+        preview_01 = self.generate_fixture_preview_file(
+            task_id=task_shot_01.id, revision=3, duration=30
+        )
+        preview_02 = self.generate_fixture_preview_file(
+            task_id=task_shot_02.id, revision=1, duration=20
+        )
+        preview_03 = self.generate_fixture_preview_file(
+            task_id=task_shot_03.id, revision=1, duration=10
+        )
+        preview_e201 = self.generate_fixture_preview_file(
+            task_id=task_shot_e201.id, revision=1, duration=40
+        )
+        return (
+            episode_01,
+            episode_02,
+            sequence_01,
+            sequence_02,
+            shot_01,
+            shot_02,
+            shot_03,
+            shot_e201,
+            task_shot_01,
+            task_shot_02,
+            task_shot_03,
+            task_shot_e201,
+            preview_01,
+            preview_02,
+            preview_03,
+            preview_e201,
+        )
+
+    def assign_task(self, task_id, user_id):
+        return tasks_service.assign_task(task_id, user_id)
+
+    def assign_task_to_artist(self, task_id):
+        if self.user_cg_artist is None:
+            self.generate_fixture_user_cg_artist()
+        self.assign_task(task_id, self.user_cg_artist["id"])
+
+    def now(self):
+        return datetime.datetime.now().replace(microsecond=0).isoformat()
+
+    def upload_csv(self, path, name):
+        file_path_fixture = self.get_fixture_file_path(
+            os.path.join("csv", "%s.csv" % name)
+        )
+        self.upload_file(path, file_path_fixture)
+
+    def get_file_path(self, filename):
+        current_path = os.path.dirname(__file__)
+        result_file_path = os.path.join(TEST_FOLDER, filename)
+        return os.path.join(current_path, "..", result_file_path)
+
+    def create_test_folder(self):
+        os.mkdir(TEST_FOLDER)
+
+    def delete_test_folder(self):
+        fs.rm_rf(TEST_FOLDER)

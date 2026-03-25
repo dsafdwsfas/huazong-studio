@@ -1,0 +1,1088 @@
+import Bowser from 'bowser'
+import { nextTick } from 'vue'
+
+import auth from '@/lib/auth'
+import init from '@/lib/init'
+import lang from '@/lib/lang'
+import sentry from '@/lib/sentry'
+import timezone from '@/lib/timezone'
+
+import peopleStore from '@/store/modules/people'
+import taskTypeStore from '@/store/modules/tasktypes'
+import userStore from '@/store/modules/user'
+import store from '@/store'
+
+import Login from '@/components/pages/Login.vue'
+import Main from '@/components/Main.vue'
+
+const AllTasks = () => import('@/components/pages/AllTasks.vue')
+const ApiDocumentation = () => import('@/components/pages/ApiDocumentation.vue')
+const ApiKeyManager = () => import('@/components/pages/ApiKeyManager.vue')
+const Asset = () => import('@/components/pages/Asset.vue')
+const AssetLibrary = () => import('@/components/pages/AssetLibrary.vue')
+const Assets = () => import('@/components/pages/Assets.vue')
+const AssetTypes = () => import('@/components/pages/AssetTypes.vue')
+const Backgrounds = () => import('@/components/pages/Backgrounds.vue')
+const Bots = () => import('@/components/pages/Bots.vue')
+const Breakdown = () => import('@/components/pages/Breakdown.vue')
+const Brief = () => import('@/components/pages/Brief.vue')
+const Budget = () => import('@/components/pages/budget/Budget.vue')
+const Concepts = () => import('@/components/pages/Concepts.vue')
+const CustomActions = () => import('@/components/pages/CustomActions.vue')
+const Departments = () => import('@/components/pages/Departments.vue')
+const Edit = () => import('@/components/pages/Edit.vue')
+const Edits = () => import('@/components/pages/Edits.vue')
+const AssetCategoryManager = () =>
+  import('@/components/pages/AssetCategoryManager.vue')
+const GlobalAssetLibrary = () =>
+  import('@/components/pages/GlobalAssetLibrary.vue')
+const AssetDashboard = () =>
+  import('@/components/pages/AssetDashboard.vue')
+const AssetReviewQueue = () =>
+  import('@/components/pages/AssetReviewQueue.vue')
+const AssetNodeGraph = () =>
+  import('@/components/pages/AssetNodeGraph.vue')
+const AssetSearchPage = () =>
+  import('@/components/pages/AssetSearchPage.vue')
+const AssetVersionDetail = () =>
+  import('@/components/pages/AssetVersionDetail.vue')
+const EntityChats = () => import('@/components/pages/EntityChats.vue')
+const EntitySearch = () => import('@/components/pages/EntitySearch.vue')
+const Episode = () => import('@/components/pages/Episode.vue')
+const Episodes = () => import('@/components/pages/Episodes.vue')
+const EpisodeStats = () => import('@/components/pages/EpisodeStats.vue')
+const FirstConnection = () => import('@/components/pages/FirstConnection.vue')
+const HardwareItems = () => import('@/components/pages/HardwareItems.vue')
+const Login2FA = () => import('@/components/pages/Login2FA.vue')
+const Logs = () => import('@/components/pages/Logs.vue')
+const MainSchedule = () => import('@/components/pages/MainSchedule.vue')
+const MyChecks = () => import('@/components/pages/MyChecks.vue')
+const NewProduction = () =>
+  import('@/components/pages/production/NewProduction.vue')
+const NotFound = () => import('@/components/pages/NotFound.vue')
+const Notifications = () => import('@/components/pages/Notifications.vue')
+const OpenProductions = () => import('@/components/pages/OpenProductions.vue')
+const People = () => import('@/components/pages/People.vue')
+const Person = () => import('@/components/pages/Person.vue')
+const Playlist = () => import('@/components/pages/Playlist.vue')
+const Plugin = () => import('@/components/pages/Plugin.vue')
+const ProductionAssetTypes = () =>
+  import('@/components/pages/ProductionAssetTypes.vue')
+const ProductionNewsFeed = () =>
+  import('@/components/pages/ProductionNewsFeed.vue')
+const ProductionQuota = () => import('@/components/pages/ProductionQuota.vue')
+const Productions = () => import('@/components/pages/Productions.vue')
+const ProductionSchedule = () =>
+  import('@/components/pages/ProductionSchedule.vue')
+const ProductionSettings = () =>
+  import('@/components/pages/ProductionSettings.vue')
+const ProductionDashboard = () =>
+  import('@/components/pages/production/ProductionDashboard.vue')
+const ProductionPermissions = () =>
+  import('@/components/pages/production/ProductionPermissions.vue')
+const Profile = () => import('@/components/pages/Profile.vue')
+const ResetChangePassword = () =>
+  import('@/components/pages/ResetChangePassword.vue')
+const ResetPassword = () => import('@/components/pages/ResetPassword.vue')
+const SalaryScale = () => import('@/components/pages/budget/SalaryScale.vue')
+const Sequence = () => import('@/components/pages/Sequence.vue')
+const Sequences = () => import('@/components/pages/Sequences.vue')
+const SequenceStats = () => import('@/components/pages/SequenceStats.vue')
+const ServerDown = () => import('@/components/pages/ServerDown.vue')
+const Settings = () => import('@/components/pages/Settings.vue')
+const Shot = () => import('@/components/pages/Shot.vue')
+const Shots = () => import('@/components/pages/Shots.vue')
+const Storyboard = () => import('@/components/pages/Storyboard.vue')
+const SoftwareLicenses = () => import('@/components/pages/SoftwareLicenses.vue')
+const StatusAutomations = () =>
+  import('@/components/pages/StatusAutomations.vue')
+const Studios = () => import('@/components/pages/Studios.vue')
+const Task = () => import('@/components/pages/Task.vue')
+const TaskStatus = () => import('@/components/pages/TaskStatus.vue')
+const TaskType = () => import('@/components/pages/TaskType.vue')
+const TaskTypes = () => import('@/components/pages/TaskTypes.vue')
+const Team = () => import('@/components/pages/Team.vue')
+const TeamSchedule = () => import('@/components/pages/TeamSchedule.vue')
+const Timesheets = () => import('@/components/pages/Timesheets.vue')
+const Todos = () => import('@/components/pages/Todos.vue')
+const WrongBrowser = () => import('@/components/pages/WrongBrowser.vue')
+
+const ADMIN_PAGES = [
+  'asset-category-manager',
+  'asset-types',
+  'backgrounds',
+  'bots',
+  'custom-actions',
+  'departments',
+  'logs',
+  'main-schedule',
+  'newsfeed',
+  'people',
+  'productions',
+  'salary-scale',
+  'task-status',
+  'task-types',
+  'team-schedule',
+  'settings',
+  'status-automations',
+  'studios'
+]
+
+export const routes = [
+  {
+    path: '',
+    component: Main,
+
+    beforeEnter: (to, from, next) => {
+      const browser = Bowser.getParser(window.navigator.userAgent)
+      const isValidBrowser = browser.satisfies({
+        // see https://vitejs.dev/guide/build.html#browser-compatibility + ES2020 support
+        chrome: '>=87',
+        firefox: '>=79',
+        edge: '>90',
+        vivaldi: '>=3.5',
+        opera: '>=73',
+        safari: '>=14'
+      })
+      if (!isValidBrowser) {
+        return next({ name: 'wrong-browser' })
+      }
+
+      auth.requireAuth(to, from, nextPath => {
+        if (nextPath) {
+          next(nextPath)
+        } else {
+          timezone.setTimezone()
+          lang.setLocale(userStore.state.user.locale)
+          sentry.setContext(
+            peopleStore.state.organisation,
+            userStore.state.user
+          )
+          if (store.state.productions.openProductions.length === 0) {
+            init(err => {
+              if (err) {
+                next({ name: 'server-down' })
+              } else {
+                if (!userStore.getters.isCurrentUserArtist(userStore.state)) {
+                  next({ name: 'open-productions' })
+                } else {
+                  next({ name: 'todos' })
+                }
+              }
+            })
+          } else {
+            store.commit('DATA_LOADING_END')
+            if (!userStore.getters.isCurrentUserArtist(userStore.state)) {
+              next({ name: 'open-productions' })
+            } else {
+              next({ name: 'todos' })
+            }
+          }
+        }
+      })
+    }
+  },
+
+  {
+    path: '/',
+    component: Main,
+
+    beforeEnter: (to, from, next) => {
+      auth.requireAuth(to, from, nextPath => {
+        if (nextPath) {
+          next(nextPath)
+        } else {
+          timezone.setTimezone()
+          lang.setLocale(userStore.state.user.locale)
+          sentry.setContext(
+            peopleStore.state.organisation,
+            userStore.state.user
+          )
+          const isProhibited =
+            !userStore.getters.isCurrentUserAdmin(userStore.state) &&
+            to &&
+            ADMIN_PAGES.includes(to.name)
+          if (taskTypeStore.state.taskTypes.length === 0) {
+            init(() => {
+              store.commit('DATA_LOADING_END')
+              if (isProhibited) {
+                next({ name: 'not-found' })
+              } else {
+                next()
+              }
+            })
+          } else {
+            store.commit('DATA_LOADING_END')
+            if (isProhibited) {
+              next({ name: 'server-down' })
+            } else {
+              next()
+            }
+          }
+        }
+      })
+    },
+
+    children: [
+      {
+        path: '',
+        name: 'home'
+      },
+
+      {
+        path: 'api-keys',
+        component: ApiKeyManager,
+        name: 'api-key-manager'
+      },
+
+      {
+        path: 'api-docs',
+        component: ApiDocumentation,
+        name: 'api-documentation'
+      },
+
+      {
+        path: 'asset-library',
+        component: AssetLibrary,
+        name: 'asset-library'
+      },
+
+      {
+        path: 'global-assets',
+        component: GlobalAssetLibrary,
+        name: 'global-asset-library'
+      },
+
+      {
+        path: 'asset-graph',
+        component: AssetNodeGraph,
+        name: 'asset-node-graph'
+      },
+
+      {
+        path: 'asset-dashboard',
+        component: AssetDashboard,
+        name: 'asset-dashboard'
+      },
+
+      {
+        path: 'asset-reviews',
+        component: AssetReviewQueue,
+        name: 'asset-review-queue'
+      },
+
+      {
+        path: 'asset-search',
+        component: AssetSearchPage,
+        name: 'asset-search'
+      },
+
+      {
+        path: 'asset-versions/:assetId',
+        component: AssetVersionDetail,
+        name: 'asset-version-detail'
+      },
+
+      {
+        path: 'asset-categories/manage',
+        component: AssetCategoryManager,
+        name: 'asset-category-manager'
+      },
+
+      {
+        path: 'asset-types',
+        name: 'asset-types',
+        component: AssetTypes
+      },
+
+      {
+        path: 'backgrounds',
+        component: Backgrounds,
+        name: 'backgrounds'
+      },
+
+      {
+        path: 'bots',
+        component: Bots,
+        name: 'bots'
+      },
+
+      {
+        path: 'departments',
+        name: 'departments',
+        component: Departments
+      },
+
+      {
+        path: 'studios',
+        name: 'studios',
+        component: Studios
+      },
+
+      {
+        path: 'salary-scale',
+        name: 'salary-scale',
+        redirect: { name: 'productions' }
+      },
+
+      {
+        name: 'custom-actions',
+        path: 'custom-actions',
+        component: CustomActions
+      },
+
+      {
+        name: 'status-automations',
+        path: 'status-automations',
+        component: StatusAutomations
+      },
+
+      {
+        name: 'software-licenses',
+        path: 'software-licenses',
+        component: SoftwareLicenses
+      },
+
+      {
+        name: 'hardware-items',
+        path: 'hardware-items',
+        redirect: { name: 'productions' }
+      },
+
+      {
+        name: 'notifications',
+        path: 'notifications',
+        component: Notifications
+      },
+
+      {
+        path: 'all-tasks',
+        component: AllTasks,
+        name: 'all-tasks'
+      },
+
+      {
+        path: 'open-productions',
+        component: OpenProductions,
+        name: 'open-productions'
+      },
+
+      {
+        path: 'new-production',
+        component: NewProduction,
+        name: 'new-production'
+      },
+
+      {
+        path: 'entity-search',
+        component: EntitySearch,
+        name: 'entity-search'
+      },
+
+      {
+        path: 'entity-chats',
+        component: EntityChats,
+        name: 'entity-chats'
+      },
+
+      {
+        path: 'people',
+        component: People,
+        name: 'people'
+      },
+
+      {
+        path: 'people/:person_id',
+        component: Person,
+        name: 'person'
+      },
+
+      {
+        path: '/main-schedule',
+        component: MainSchedule,
+        name: 'main-schedule'
+      },
+
+      {
+        path: '/team-schedule',
+        component: TeamSchedule,
+        name: 'team-schedule'
+      },
+
+      {
+        path: '/timesheets',
+        component: Timesheets,
+        name: 'timesheets',
+        children: [
+          {
+            path: 'year/:year',
+            component: Timesheets,
+            name: 'timesheets-year'
+          },
+          {
+            path: 'year/:year/persons/:person_id',
+            component: Timesheets,
+            name: 'timesheets-year-person'
+          },
+          {
+            path: 'month/:year',
+            component: Timesheets,
+            name: 'timesheets-month'
+          },
+          {
+            path: 'month/:year/:month/persons/:person_id',
+            component: Timesheets,
+            name: 'timesheets-month-person'
+          },
+          {
+            path: 'week/:year',
+            component: Timesheets,
+            name: 'timesheets-week'
+          },
+          {
+            path: 'week/:year/:week/persons/:person_id',
+            component: Timesheets,
+            name: 'timesheets-week-person'
+          },
+          {
+            path: 'day/:year/:month',
+            component: Timesheets,
+            name: 'timesheets-day'
+          },
+          {
+            path: 'day/:year/:month/:day/persons/:person_id',
+            component: Timesheets,
+            name: 'timesheets-day-person'
+          }
+        ]
+      },
+
+      {
+        path: '/logs',
+        component: Logs,
+        name: 'logs'
+      },
+
+      {
+        path: 'profile',
+        component: Profile,
+        name: 'profile',
+        children: [
+          {
+            path: 'change-avatar',
+            component: Profile,
+            name: 'change-avatar'
+          }
+        ]
+      },
+
+      {
+        path: '/plugins/:plugin_id',
+        component: Plugin,
+        name: 'plugin'
+      },
+
+      {
+        path: 'settings',
+        component: Settings,
+        name: 'settings'
+      },
+
+      {
+        name: 'task-types',
+        path: 'task-types',
+        component: TaskTypes
+      },
+
+      {
+        name: 'task-status',
+        path: 'task-status',
+        component: TaskStatus
+      },
+      {
+        path: 'my-tasks',
+        component: Todos,
+        name: 'todos'
+      },
+
+      {
+        path: 'my-checks',
+        component: MyChecks,
+        name: 'checks'
+      },
+
+      {
+        path: 'productions',
+        component: Productions,
+        name: 'productions',
+        children: [
+          {
+            path: 'new',
+            component: Productions,
+            name: 'productions-new'
+          },
+          {
+            path: 'edit/:production_edit_id',
+            component: Productions,
+            name: 'edit-production'
+          },
+          {
+            path: 'delete/:production_delete_id',
+            component: Productions,
+            name: 'delete-production'
+          }
+        ]
+      },
+
+      {
+        path: 'productions/:production_id/dashboard',
+        component: ProductionDashboard,
+        name: 'production-dashboard'
+      },
+
+      {
+        path: 'productions/:production_id/permissions',
+        component: ProductionPermissions,
+        name: 'production-permissions'
+      },
+
+      {
+        path: 'productions/:production_id/team',
+        component: Team,
+        name: 'team'
+      },
+
+      {
+        path: 'productions/:production_id/budget',
+        name: 'budget',
+        redirect: (to) => ({
+          name: 'production-dashboard',
+          params: { production_id: to.params.production_id }
+        })
+      },
+
+      {
+        path: 'news-feed',
+        component: ProductionNewsFeed,
+        name: 'newsfeed'
+      },
+
+      {
+        path: 'productions/:production_id/news-feed',
+        component: ProductionNewsFeed,
+        name: 'news-feed'
+      },
+
+      {
+        path: 'productions/:production_id/schedule',
+        component: ProductionSchedule,
+        name: 'schedule'
+      },
+
+      {
+        path: 'productions/:production_id/production-settings',
+        component: ProductionSettings,
+        name: 'production-settings'
+      },
+
+      {
+        path: 'productions/:production_id/brief',
+        component: Brief,
+        name: 'brief'
+      },
+
+      {
+        path: 'productions/:production_id/plugins/:plugin_id',
+        component: Plugin,
+        name: 'production-plugin'
+      },
+
+      {
+        path: 'productions/:production_id/episodes/:episode_id/plugins/:plugin_id',
+        component: Plugin,
+        name: 'episode-production-plugin'
+      },
+
+      {
+        path: 'productions/:production_id/quota',
+        component: ProductionQuota,
+        name: 'quota',
+        children: [
+          {
+            path: 'month/:year',
+            component: ProductionQuota,
+            name: 'quota-month'
+          },
+          {
+            path: 'month/:year/:month/persons/:person_id',
+            component: ProductionQuota,
+            name: 'quota-month-person'
+          },
+          {
+            path: 'week/:year',
+            component: ProductionQuota,
+            name: 'quota-week'
+          },
+          {
+            path: 'week/:year/:week/persons/:person_id',
+            component: ProductionQuota,
+            name: 'quota-week-person'
+          },
+          {
+            path: 'day/:year/:month',
+            component: ProductionQuota,
+            name: 'quota-day'
+          },
+          {
+            path: 'day/:year/:month/:day/persons/:person_id',
+            component: ProductionQuota,
+            name: 'quota-day-person'
+          }
+        ]
+      },
+
+      {
+        path: 'productions/:production_id/episodes/:episode_id/quota',
+        component: ProductionQuota,
+        name: 'episode-quota',
+        children: [
+          {
+            path: 'month/:year',
+            component: ProductionQuota,
+            name: 'episode-quota-month'
+          },
+          {
+            path: 'month/:year/:month/persons/:person_id',
+            component: ProductionQuota,
+            name: 'episode-quota-month-person'
+          },
+          {
+            path: 'week/:year',
+            component: ProductionQuota,
+            name: 'episode-quota-week'
+          },
+          {
+            path: 'week/:year/:week/persons/:person_id',
+            component: ProductionQuota,
+            name: 'episode-quota-week-person'
+          },
+          {
+            path: 'day/:year/:month',
+            component: ProductionQuota,
+            name: 'episode-quota-day'
+          },
+          {
+            path: 'day/:year/:month/:day/persons/:person_id',
+            component: ProductionQuota,
+            name: 'episode-quota-day-person'
+          }
+        ]
+      },
+
+      {
+        path: 'productions/:production_id/playlists',
+        component: Playlist,
+        name: 'playlists',
+        children: [
+          {
+            name: 'playlist',
+            path: ':playlist_id',
+            component: Playlist
+          },
+          {
+            name: 'delete-playlist',
+            path: ':playlist_id/delete',
+            component: Playlist
+          },
+          {
+            name: 'edit-playlist',
+            path: ':playlist_id/edit',
+            component: Playlist
+          }
+        ]
+      },
+
+      {
+        path: 'productions/:production_id/breakdown',
+        component: Breakdown,
+        name: 'breakdown',
+        children: [
+          {
+            path: 'sequences/:sequence_id',
+            component: Breakdown,
+            name: 'breakdown-sequence'
+          },
+          {
+            path: 'asset-types/:asset_type_id',
+            component: Breakdown,
+            name: 'breakdown-asset-type'
+          }
+        ]
+      },
+
+      {
+        path: 'productions/:production_id/concepts',
+        component: Concepts,
+        name: 'concepts'
+      },
+
+      {
+        path: 'productions/:production_id/assets',
+        component: Assets,
+        name: 'assets'
+      },
+
+      {
+        path: 'productions/:production_id/assets/:asset_id',
+        component: Asset,
+        name: 'asset'
+      },
+
+      {
+        path: 'productions/:production_id/shots',
+        component: Shots,
+        name: 'shots'
+      },
+
+      {
+        path: 'productions/:production_id/storyboard',
+        component: Storyboard,
+        name: 'storyboard'
+      },
+
+      {
+        path: 'productions/:production_id/shots/:shot_id',
+        component: Shot,
+        name: 'shot'
+      },
+
+      {
+        path: 'productions/:production_id/edits',
+        component: Edits,
+        name: 'edits'
+      },
+
+      {
+        path: 'productions/:production_id/edits/:edit_id',
+        component: Edit,
+        name: 'edit'
+      },
+
+      {
+        path: 'productions/:production_id/episodes',
+        component: Episodes,
+        name: 'episodes',
+        children: []
+      },
+      {
+        path: 'productions/:production_id/episodes/:episode_id',
+        component: Episode,
+        name: 'episode'
+      },
+
+      {
+        path: 'productions/:production_id/sequences/:sequence_id',
+        component: Sequence,
+        name: 'sequence'
+      },
+
+      {
+        path: 'productions/:production_id/sequences',
+        component: Sequences,
+        name: 'sequences'
+      },
+
+      {
+        path: 'productions/:production_id/sequence-stats',
+        component: SequenceStats,
+        name: 'sequence-stats'
+      },
+
+      {
+        path: 'productions/:production_id/asset-types',
+        component: ProductionAssetTypes,
+        name: 'production-asset-types'
+      },
+
+      {
+        path: 'productions/:production_id/:type/task-types/:task_type_id',
+        component: TaskType,
+        name: 'task-type',
+        children: [
+          {
+            name: 'task-type-schedule',
+            path: 'schedule',
+            component: TaskType
+          },
+          {
+            name: 'task-type-estimation',
+            path: 'estimation',
+            component: TaskType
+          }
+        ]
+      },
+
+      {
+        name: 'episode-task',
+        path: 'productions/:production_id/episodes/:episode_id/:type/tasks/:task_id',
+        component: Task,
+        children: [
+          {
+            name: 'episode-task-preview',
+            path: 'previews/:preview_id',
+            component: Task
+          }
+        ]
+      },
+
+      {
+        name: 'task',
+        path: 'productions/:production_id/:type/tasks/:task_id',
+        component: Task,
+        children: [
+          {
+            name: 'task-change-preview',
+            path: 'comments/:comment_id/change-preview',
+            component: Task
+          },
+          {
+            name: 'task-preview',
+            path: 'previews/:preview_id',
+            component: Task
+          }
+        ]
+      },
+
+      {
+        path: 'productions/:production_id/episode-stats',
+        component: EpisodeStats,
+        name: 'episode-stats',
+        children: []
+      },
+
+      {
+        path: 'productions/:production_id/episodes/:episode_id/schedule',
+        component: ProductionSchedule,
+        name: 'episode-schedule'
+      },
+      {
+        path: 'productions/:production_id/episodes/:episode_id/playlists',
+        component: Playlist,
+        name: 'episode-playlists',
+        children: [
+          {
+            name: 'episode-playlist',
+            path: ':playlist_id',
+            component: Playlist
+          },
+          {
+            name: 'episode-delete-playlist',
+            path: ':playlist_id/delete',
+            component: Playlist
+          },
+          {
+            name: 'episode-edit-playlist',
+            path: ':playlist_id/edit',
+            component: Playlist
+          }
+        ]
+      },
+
+      {
+        path: 'productions/:production_id/episodes/:episode_id/breakdown',
+        component: Breakdown,
+        name: 'episode-breakdown',
+        children: [
+          {
+            path: 'sequences/:sequence_id',
+            component: Breakdown,
+            name: 'episode-breakdown-sequence'
+          },
+          {
+            path: 'asset-types/:asset_type_id',
+            component: Breakdown,
+            name: 'episode-breakdown-asset-type'
+          }
+        ]
+      },
+
+      {
+        path: 'productions/:production_id/episodes/:episode_id/assets',
+        component: Assets,
+        name: 'episode-assets'
+      },
+
+      {
+        path: 'productions/:production_id/episodes/:episode_id/assets/:asset_id',
+        component: Asset,
+        name: 'episode-asset'
+      },
+
+      {
+        path: 'productions/:production_id/episodes/:episode_id/shots',
+        component: Shots,
+        name: 'episode-shots'
+      },
+
+      {
+        path: 'productions/:production_id/episodes/:episode_id/storyboard',
+        component: Storyboard,
+        name: 'episode-storyboard'
+      },
+
+      {
+        path: 'productions/:production_id/episodes/:episode_id/shots/:shot_id',
+        component: Shot,
+        name: 'episode-shot'
+      },
+
+      {
+        path: 'productions/:production_id/episodes/:episode_id/edits',
+        component: Edits,
+        name: 'episode-edits',
+        children: []
+      },
+
+      {
+        path: 'productions/:production_id/episodes/:episode_id/edits/:edit_id',
+        component: Edit,
+        name: 'episode-edit'
+      },
+
+      {
+        path: 'productions/:production_id/episodes/:episode_id/asset-types',
+        component: ProductionAssetTypes,
+        name: 'episode-production-asset-types'
+      },
+
+      {
+        path: 'productions/:production_id/episodes/:episode_id/sequences',
+        component: Sequences,
+        name: 'episode-sequences'
+      },
+
+      {
+        path: 'productions/:production_id/episodes/:episode_id/sequences/:sequence_id',
+        component: Sequence,
+        name: 'episode-sequence'
+      },
+
+      {
+        path: 'productions/:production_id/episodes/:episode_id/sequence-stats',
+        component: SequenceStats,
+        name: 'episode-sequence-stats'
+      },
+
+      {
+        path: 'productions/:production_id/episodes/:episode_id/:type/task-types/:task_type_id',
+        component: TaskType,
+        name: 'episode-task-type',
+        children: [
+          {
+            name: 'episode-task-type-schedule',
+            path: 'schedule',
+            component: TaskType
+          },
+          {
+            name: 'episode-task-type-estimation',
+            path: 'estimation',
+            component: TaskType
+          }
+        ]
+      },
+
+      {
+        path: 'productions/:production_id/episodes/task-types/:task_type_id',
+        component: TaskType,
+        name: 'episodes-task-type',
+        meta: {
+          section: 'episodes'
+        },
+        children: [
+          {
+            name: 'episodes-task-type-schedule',
+            path: 'schedule',
+            component: TaskType
+          },
+          {
+            name: 'episodes-task-type-estimation',
+            path: 'estimation',
+            component: TaskType
+          }
+        ]
+      },
+
+      {
+        path: 'productions/:production_id/episodes/:episode_id/tasks/:task_id',
+        name: 'episode-episode-task',
+        component: Task,
+        children: [
+          {
+            name: 'episode-episode-task-preview',
+            path: 'previews/:preview_id',
+            component: Task
+          }
+        ]
+      }
+    ]
+  },
+
+  {
+    path: '/login',
+    component: Login,
+    name: 'login'
+  },
+  {
+    path: '/login/2fa',
+    component: Login2FA,
+    name: 'login-2fa',
+    beforeEnter: (to, from) => {
+      if (!store.getters.user) return { name: 'login' }
+    }
+  },
+  {
+    path: '/logout',
+    name: 'logout',
+    beforeEnter: (to, from, next) => {
+      next('/login')
+      nextTick(async () => {
+        try {
+          await store.dispatch('logout')
+        } catch (error) {
+          console.error('An error occurred while logout', error)
+        }
+      })
+    }
+  },
+  {
+    path: '/first-connection',
+    component: FirstConnection,
+    name: 'first-connection'
+  },
+  {
+    path: '/reset-password',
+    component: ResetPassword,
+    name: 'reset-password'
+  },
+  {
+    path: '/reset-change-password',
+    component: ResetChangePassword,
+    name: 'reset-change-password'
+  },
+  {
+    path: '/server-down',
+    component: ServerDown,
+    name: 'server-down'
+  },
+  {
+    path: '/wrong-browser',
+    component: WrongBrowser,
+    name: 'wrong-browser'
+  },
+
+  {
+    path: '/:pathMatch(.*)*',
+    component: NotFound,
+    name: 'not-found'
+  }
+]
